@@ -1,0 +1,75 @@
+# Environment
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Uploads
+uploads/
+
+# Logs
+logs/
+*.log
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Coverage / tests
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+
+# Alembic
+alembic/versions/*.pyc
+
+# AWS
+.aws/
+aws-credentials
+
+# WeasyPrint
+*.pdf
+
+# ReportLab
+reportlab_*
+
+# Local scratch / notes files
+presigned.txt
+celery.txt
+i.txt
+
+# Terraform / infra (if added later)
+*.tfstate
+*.tfstate.backup
+.terraform/
