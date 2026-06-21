@@ -4,9 +4,8 @@ from app.auth.dependencies import get_current_user
 from app.config import settings
 from app.cortex import service as cortex_svc
 from app.cortex.db import CortexSessionLocal
-from app.cortex.ingestion import run_ingestion
+from app.cortex.ingestion import run_ingestion, run_seed_ingestion
 from app.cortex.schemas import CortexStatsResponse, IngestionRequest, IngestionResponse
-from app.cortex.seeds import SEED_KEYWORDS_BY_DOMAIN
 from app.logger import get_logger
 from app.users.models import User
 
@@ -27,24 +26,25 @@ async def ingest_sync(
     body: IngestionRequest,
     _: User = Depends(_require_admin),
 ):
-    """Synchronous ingestion with custom keywords (admin only)."""
-    result = await run_ingestion(body.keywords, body.locations)
+    """Synchronous ingestion with explicit keywords — also registers them for future crons."""
+    from app.cortex.registry import register_keywords
+    await register_keywords(body.keywords)
+    result = await run_seed_ingestion(body.keywords, body.locations)
     return IngestionResponse(status="done", **result)
 
 
 @router.post("/ingest/full", response_model=IngestionResponse, status_code=202)
 async def ingest_full(
     locations: list[str] | None = None,
-    domain: str | None = None,
     _: User = Depends(_require_admin),
 ):
     """
-    Enqueue a full Cortex ingestion via Celery (admin only).
-    Covers all seed domains unless `domain` is specified.
+    Enqueue a Cortex refresh via Celery (admin only).
+    Uses the keyword registry built from real user pipelines.
     The same task runs automatically every night at 2am via Celery Beat.
     """
     from app.worker.tasks import full_ingestion
-    task = full_ingestion.delay(locations=locations or None, domain=domain)
+    task = full_ingestion.delay(locations=locations or None)
     logger.info("[cortex] full_ingestion enqueued — task_id=%s", task.id)
     return IngestionResponse(status="queued", **{"fetched": 0, "new": 0, "stored": 0})
 
@@ -61,13 +61,12 @@ async def cleanup_old_jobs(
     return {"status": "queued", "task_id": task.id}
 
 
-@router.get("/domains")
-async def list_domains(current_user: User = Depends(get_current_user)):
-    """List available seed domains and their keyword counts."""
-    return {
-        domain: len(keywords)
-        for domain, keywords in SEED_KEYWORDS_BY_DOMAIN.items()
-    }
+@router.get("/registry")
+async def list_registry(_: User = Depends(_require_admin)):
+    """List all keywords registered from user pipelines."""
+    from app.cortex.registry import get_all_keywords
+    keywords = await get_all_keywords()
+    return {"count": len(keywords), "keywords": sorted(keywords)}
 
 
 @router.get("/stats", response_model=CortexStatsResponse)

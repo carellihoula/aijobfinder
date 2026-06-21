@@ -7,49 +7,48 @@ from app.config import settings
 from app.cortex import service as cortex_svc
 from app.cortex.db import CortexSessionLocal
 from app.cortex.enricher import enrich_seniority
-from app.cortex.seeds import SEED_KEYWORDS, SEED_KEYWORDS_BY_DOMAIN
 from app.logger import get_logger
-from app.pipeline.nodes.job_search import _active_providers, _search_adzuna, _search_jsearch
+from app.pipeline.nodes.job_search import _search_adzuna
 
 logger = get_logger(__name__)
 
 
-async def run_full_ingestion(locations: list[str] | None = None, domain: str | None = None) -> dict:
+async def run_ingestion_from_registry(locations: list[str] | None = None) -> dict:
     """
-    Broad ingestion using seed keywords to build a generalist Cortex.
+    Nightly cron ingestion — uses keywords accumulated from real user pipelines.
+    Fetches only offers from the last 3 days (date_posted="3") to stay efficient.
+    Returns early if the registry is empty (no users have run the pipeline yet).
 
-    Args:
-        locations: list of locations to search in (e.g. ["Paris", "Lyon"]).
-                   If None, searches without location constraint.
-        domain: optional domain key from SEED_KEYWORDS_BY_DOMAIN to ingest only one domain.
-                If None, ingests ALL domains.
-
-    Called by:
-        - Admin endpoint POST /cortex/ingest/full
-        - Cron job (daily/weekly)
+    Called by: Celery Beat nightly cron, POST /cortex/ingest/full admin endpoint.
     """
-    if domain:
-        keywords = SEED_KEYWORDS_BY_DOMAIN.get(domain, [])
-        if not keywords:
-            logger.warning("[ingestion] Unknown domain '%s' — available: %s", domain, list(SEED_KEYWORDS_BY_DOMAIN))
-            return {"fetched": 0, "new": 0, "stored": 0}
-        logger.info("[ingestion] Full ingestion — domain=%s (%d keywords)", domain, len(keywords))
-    else:
-        keywords = SEED_KEYWORDS
-        logger.info("[ingestion] Full ingestion — ALL domains (%d keywords)", len(keywords))
+    from app.cortex.registry import get_all_keywords
 
-    return await run_ingestion(keywords, locations)
+    keywords = await get_all_keywords()
+    if not keywords:
+        logger.info("[ingestion] Registry empty — no user keywords yet, skipping")
+        return {"fetched": 0, "new": 0, "stored": 0}
+
+    logger.info("[ingestion] Registry ingestion — %d keywords", len(keywords))
+    return await run_ingestion(keywords, locations, date_posted="3")
 
 
-async def run_ingestion(keywords: list[str], locations: list[str] | None = None) -> dict:
+async def run_seed_ingestion(keywords: list[str], locations: list[str] | None = None) -> dict:
+    """Manual admin bootstrap with explicit keywords (no date filter)."""
+    logger.info("[ingestion] Seed ingestion — %d keywords", len(keywords))
+    return await run_ingestion(keywords, locations, date_posted="")
+
+
+async def run_ingestion(keywords: list[str], locations: list[str] | None = None, date_posted: str = "") -> dict:
     """
     Ingestion pipeline:
-      1. Fetch raw jobs from configured providers
+      1. Fetch raw jobs from Adzuna
       2. Deduplicate in memory (hash: title+company+location)
       3. Identify jobs already in Cortex → refresh last_seen only
       4. Detect seniority via LLM batch (30 jobs/call, gpt-4o-mini)
       5. Embed new jobs
       6. Store in Cortex
+
+    date_posted: Adzuna filter — "" = all time, "1" = last 24h, "3" = last 3 days.
     """
     if CortexSessionLocal is None:
         logger.error("[ingestion] CORTEX_DATABASE_URL not configured")
@@ -58,35 +57,26 @@ async def run_ingestion(keywords: list[str], locations: list[str] | None = None)
     if locations is None:
         locations = [""]
 
-    providers = _active_providers()
-    if not providers:
-        logger.warning("[ingestion] No providers configured")
+    if not (settings.ADZUNA_APP_ID and settings.ADZUNA_APP_KEY):
+        logger.warning("[ingestion] Adzuna not configured")
         return {"fetched": 0, "new": 0, "stored": 0}
 
     # ── 1. Fetch ──────────────────────────────────────────────────────────────
     logger.info(
-        "[ingestion] Fetching — providers=%s, keywords=%d, locations=%s",
-        providers, len(keywords), locations,
+        "[ingestion] Fetching via Adzuna — keywords=%d, locations=%s",
+        len(keywords), locations,
     )
-    combos = [
-        (provider, kw, loc)
-        for kw in keywords
-        for loc in locations
-        for provider in providers
-    ]
+    combos = [(kw, loc) for kw in keywords for loc in locations]
     raw_results = []
     async with httpx.AsyncClient(timeout=30) as client:
-        for i, (provider, kw, loc) in enumerate(combos):
+        for i, (kw, loc) in enumerate(combos):
             try:
-                if provider == "jsearch":
-                    result = await _search_jsearch(client, kw, loc, "", False, "", "")
-                else:
-                    result = await _search_adzuna(client, kw, loc, "", False, "", "")
+                result = await _search_adzuna(client, kw, loc, "", False, date_posted, "")
                 raw_results.append(result)
             except Exception as exc:
                 raw_results.append(exc)
             if i < len(combos) - 1:
-                await asyncio.sleep(1.2)  # ~50 req/min max, within free tier limits
+                await asyncio.sleep(1.2)
 
     # ── 2. Deduplicate in memory ──────────────────────────────────────────────
     seen: set[str] = set()

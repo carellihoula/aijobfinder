@@ -23,11 +23,12 @@ celery_app.conf.update(
 
 # ── Scheduled tasks (Celery Beat) ─────────────────────────────────────────────
 celery_app.conf.beat_schedule = {
-    # Full ingestion every night at 2am — all domains, all seed keywords
+    # Nightly cron — re-fetches Adzuna for all keywords accumulated from user pipelines.
+    # Uses date_posted=3 (last 3 days) to stay efficient. Skips if registry is empty.
     "cortex-full-ingestion-nightly": {
         "task": "app.worker.tasks.full_ingestion",
         "schedule": crontab(hour=2, minute=0),
-        "kwargs": {"locations": None, "domain": None},
+        "kwargs": {"locations": None},
     },
     # Cleanup old jobs every Sunday at 3am — deactivate jobs not seen in 30 days
     "cortex-cleanup-weekly": {

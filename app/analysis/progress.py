@@ -1,69 +1,100 @@
-"""In-process event bus for streaming pipeline progress to SSE clients."""
+"""Pipeline progress events via Redis Pub/Sub.
+
+Publish side  (Celery worker) : await publish(analysis_id, node_name)
+Subscribe side (FastAPI SSE)  : async for event in subscribe(analysis_id): ...
+
+History is stored in a Redis LIST (1h TTL) so late SSE subscribers
+receive all past events without missing any — race-condition safe because
+we subscribe to the channel BEFORE reading history.
+"""
 import asyncio
-from collections import defaultdict
+import json
 from typing import AsyncIterator
 
-_queues:  dict[str, list[asyncio.Queue]] = defaultdict(list)
-_history: dict[str, list[dict]]          = defaultdict(list)  # replay buffer
+import redis.asyncio as aioredis
+
+from app.config import settings
+
+_CHANNEL     = "pipeline:progress:{}"
+_HISTORY     = "pipeline:history:{}"
+_HISTORY_TTL = 3600  # 1 hour
 
 NODE_LABELS: dict[str, str] = {
-    "pdf_parser":         "Lecture du CV",
-    "cv_structurer":      "Analyse du profil",
-    "cortex_search":      "Recherche Cortex",
-    "keyword_extractor":  "Extraction des mots-clés",
-    "job_search":         "Recherche d'offres",
-    "cortex_feed":        "Mise à jour Cortex",
-    "prepare_retry":      "Nouvelle tentative",
-    "embeddings_filter":  "Filtrage sémantique",
-    "llm_reranker":       "Classement IA",
-    "report_generator":   "Génération du rapport",
+    "pdf_parser":        "Lecture du CV",
+    "cv_structurer":     "Analyse du profil",
+    "keyword_extractor": "Extraction des mots-clés",
+    "job_search":        "Recherche d'offres",
+    "cortex_feed":       "Mise à jour Cortex",
+    "prepare_retry":     "Nouvelle tentative",
+    "embeddings_filter": "Filtrage sémantique",
+    "llm_reranker":      "Classement IA",
+    "report_generator":  "Génération du rapport",
 }
 
 
-def publish(analysis_id: str, node: str) -> None:
+def _r() -> aioredis.Redis:
+    return aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+
+
+async def publish(analysis_id: str, node: str) -> None:
     event = {"node": node, "label": NODE_LABELS.get(node, node)}
-    _history[analysis_id].append(event)          # always store in history
-    for q in _queues.get(analysis_id, []):       # push to live subscribers
-        q.put_nowait(event)
+    raw = json.dumps(event)
+    async with _r() as r:
+        pipe = r.pipeline()
+        pipe.rpush(_HISTORY.format(analysis_id), raw)
+        pipe.expire(_HISTORY.format(analysis_id), _HISTORY_TTL)
+        pipe.publish(_CHANNEL.format(analysis_id), raw)
+        await pipe.execute()
 
 
-def publish_done(analysis_id: str) -> None:
-    done = {"done": True}
-    _history[analysis_id].append(done)
-    for q in _queues.get(analysis_id, []):
-        q.put_nowait(done)
-    _queues.pop(analysis_id, None)
+async def publish_done(analysis_id: str) -> None:
+    raw = json.dumps({"done": True})
+    async with _r() as r:
+        pipe = r.pipeline()
+        pipe.rpush(_HISTORY.format(analysis_id), raw)
+        pipe.expire(_HISTORY.format(analysis_id), _HISTORY_TTL)
+        pipe.publish(_CHANNEL.format(analysis_id), raw)
+        await pipe.execute()
 
 
 async def subscribe(analysis_id: str, timeout: int = 600) -> AsyncIterator[dict]:
-    q: asyncio.Queue = asyncio.Queue()
+    r = _r()
+    pubsub = r.pubsub()
 
-    # Replay all events published before this subscriber connected
-    for past in _history.get(analysis_id, []):
-        q.put_nowait(past)
+    # Subscribe BEFORE reading history — avoids the race where done is published
+    # between lrange and subscribe
+    await pubsub.subscribe(_CHANNEL.format(analysis_id))
 
-    _queues[analysis_id].append(q)
     try:
-        while True:
-            try:
-                event = await asyncio.wait_for(q.get(), timeout=timeout)
-            except asyncio.TimeoutError:
-                break
+        # Replay all past events (pipeline may have already progressed)
+        past = await r.lrange(_HISTORY.format(analysis_id), 0, -1)
+        for raw in past:
+            event = json.loads(raw)
             yield event
             if event.get("done"):
-                break
+                return  # Pipeline already finished, nothing more to wait for
+
+        # Listen for live events
+        async with asyncio.timeout(timeout):
+            async for message in pubsub.listen():
+                if message["type"] == "message":
+                    event = json.loads(message["data"])
+                    yield event
+                    if event.get("done"):
+                        break
+
+    except asyncio.TimeoutError:
+        pass
     finally:
-        try:
-            _queues[analysis_id].remove(q)
-        except (ValueError, KeyError):
-            pass
+        await pubsub.unsubscribe(_CHANNEL.format(analysis_id))
+        await r.aclose()
 
 
-def has_history(analysis_id: str) -> bool:
-    return bool(_history.get(analysis_id))
+async def has_history(analysis_id: str) -> bool:
+    async with _r() as r:
+        return await r.llen(_HISTORY.format(analysis_id)) > 0
 
 
-def clear(analysis_id: str) -> None:
-    """Clean up history after analysis is done (called on pipeline completion)."""
-    _history.pop(analysis_id, None)
-    _queues.pop(analysis_id, None)
+async def clear(analysis_id: str) -> None:
+    async with _r() as r:
+        await r.delete(_HISTORY.format(analysis_id))

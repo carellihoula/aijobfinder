@@ -61,7 +61,7 @@ async def search_jobs(
     - contract_type: hard filter (user explicitly chose a contract type)
     - remote: hard filter (user explicitly wants remote)
     - seniority: hard filter (user explicitly chose a level — LLM-tagged at ingestion)
-    - locations: soft ILIKE filter
+    - locations: ILIKE filter — None means no filter (all France)
     """
     embedding_str = json.dumps(query_embedding)
 

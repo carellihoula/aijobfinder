@@ -1,7 +1,6 @@
 from langgraph.graph import END, StateGraph
 
 from app.pipeline.nodes.cortex_feed import cortex_feed_node
-from app.pipeline.nodes.cortex_search import cortex_search_node
 from app.pipeline.nodes.cv_structurer import cv_structurer_node
 from app.pipeline.nodes.embeddings_filter import embeddings_filter_node
 from app.pipeline.nodes.job_search import job_search_node
@@ -13,11 +12,6 @@ from app.pipeline.nodes.report_generator import report_generator_node
 from app.pipeline.state import PipelineState
 
 MAX_SEARCH_ATTEMPTS = 2
-
-
-def _route_after_cortex(state: PipelineState) -> str:
-    """Cortex hit → reranker directly. Cortex miss → API fallback."""
-    return "llm_reranker" if state.get("filtered_jobs") else "keyword_extractor"
 
 
 def _route_after_job_search(state: PipelineState) -> str:
@@ -38,7 +32,6 @@ def _build() -> StateGraph:
 
     graph.add_node("pdf_parser",        pdf_parser_node)
     graph.add_node("cv_structurer",     cv_structurer_node)
-    graph.add_node("cortex_search",     cortex_search_node)
     graph.add_node("keyword_extractor", keyword_extractor_node)
     graph.add_node("job_search",        job_search_node)
     graph.add_node("cortex_feed",       cortex_feed_node)
@@ -48,37 +41,28 @@ def _build() -> StateGraph:
     graph.add_node("report_generator",  report_generator_node)
 
     graph.set_entry_point("pdf_parser")
-    graph.add_edge("pdf_parser",    "cv_structurer")
-    graph.add_edge("cv_structurer", "cortex_search")
-
-    # Cortex hit → reranker, miss → API fallback
-    graph.add_conditional_edges(
-        "cortex_search",
-        _route_after_cortex,
-        {
-            "llm_reranker":      "llm_reranker",
-            "keyword_extractor": "keyword_extractor",
-        },
-    )
-
+    graph.add_edge("pdf_parser",        "cv_structurer")
+    graph.add_edge("cv_structurer",     "keyword_extractor")
     graph.add_edge("keyword_extractor", "job_search")
 
-    # job_search → feed Cortex (background) → filter, OR retry, OR give up
+    # Jobs found → feed Cortex (background) → filter → rerank
+    # No jobs + retries left → retry with relaxed keywords/filters
+    # No jobs + max retries → empty report
     graph.add_conditional_edges(
         "job_search",
         _route_after_job_search,
         {
-            "cortex_feed":       "cortex_feed",
-            "prepare_retry":     "prepare_retry",
-            "report_generator":  "report_generator",
+            "cortex_feed":      "cortex_feed",
+            "prepare_retry":    "prepare_retry",
+            "report_generator": "report_generator",
         },
     )
 
     # cortex_feed is fire-and-forget → always continues to embeddings_filter
-    graph.add_edge("cortex_feed",   "embeddings_filter")
+    graph.add_edge("cortex_feed",    "embeddings_filter")
 
     # retry loop
-    graph.add_edge("prepare_retry", "keyword_extractor")
+    graph.add_edge("prepare_retry",  "keyword_extractor")
 
     graph.add_edge("embeddings_filter", "llm_reranker")
     graph.add_edge("llm_reranker",      "report_generator")

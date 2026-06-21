@@ -1,0 +1,506 @@
+================================================================================
+  AILFJ — ARCHITECTURE COMPLÈTE (état au 21/06/2026)
+  AI-powered CV to Job Matching API
+================================================================================
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  VUE D'ENSEMBLE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+L'utilisateur uploade son CV en PDF.
+L'API répond immédiatement (202 Accepted).
+En arrière-plan, un pipeline IA analyse le CV, cherche des offres d'emploi,
+les classe par pertinence, et génère un rapport Markdown personnalisé.
+Le tout est streamé en temps réel vers le navigateur via SSE.
+
+Schéma global :
+
+  [Browser / Frontend React]
+         │
+         │  HTTP / REST + SSE (Server-Sent Events)
+         ▼
+  ┌─────────────────────────┐
+  │      FastAPI (API)       │  — répond aux requêtes HTTP
+  │   uvicorn app.main:app   │  — authentification JWT
+  └──────────┬──────────────┘  — stockage CV sur S3 / disque
+             │                  — enqueue les tasks dans Redis
+             │  task.delay()
+             ▼
+  ┌─────────────────────────┐
+  │         Redis            │  — broker de messages (file d'attente)
+  │   redis://localhost:6379 │  — replay buffer SSE (historique events)
+  └──────────┬──────────────┘  — pub/sub pour le streaming en temps réel
+             │
+             │  consomme les tasks
+             ▼
+  ┌─────────────────────────┐
+  │    Celery Worker         │  — exécute le pipeline LangGraph
+  │  (process séparé)        │  — appels OpenAI, Adzuna
+  └──────────┬──────────────┘  — sauvegarde résultats en DB
+             │
+             ▼
+  ┌─────────────────────────┐
+  │     PostgreSQL (main)    │  — users, cvs, analyses
+  │     PostgreSQL + pgvector│  — Cortex : index vectoriel d'offres
+  └─────────────────────────┘
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  RÔLE DE FASTAPI (app/main.py)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+FastAPI est le serveur HTTP. Son unique rôle est de recevoir les requêtes du
+browser, de les valider, et soit de répondre directement, soit d'envoyer une
+task à Celery. Il ne fait AUCUN traitement lourd.
+
+Démarrage (lifespan) :
+  - init_db()     : crée les tables PostgreSQL si elles n'existent pas
+  - init_cortex() : crée l'extension pgvector + table CortexJob si besoin
+
+Middlewares :
+  - CORSMiddleware : autorise les requêtes depuis le frontend React (localhost:5173)
+
+Routers enregistrés :
+  - /auth     → inscription, login, JWT
+  - /users    → profil utilisateur
+  - /analysis → upload CV, résultats, SSE stream
+  - /cover-letter → génération lettre de motivation PDF
+  - /cortex   → administration de l'index vectoriel (admin only)
+  - /health   → healthcheck simple
+
+
+ENDPOINTS PRINCIPAUX :
+┌────────────────────────────────────┬───────────────────────────────────────┐
+│ POST /auth/register                │ Créer un compte (password min 8 chars)│
+│ POST /auth/login                   │ Obtenir un JWT (expire en 60 min)     │
+│ POST /analysis/upload              │ Uploader un PDF → lance le pipeline   │
+│ GET  /analysis/{id}                │ Récupérer le résultat d'une analyse   │
+│ GET  /analysis/{id}/stream         │ SSE : progression du pipeline en live │
+│ GET  /analysis/{id}/cv             │ Récupérer le PDF du CV (S3 ou local)  │
+│ POST /analysis/{id}/cover-letter   │ Générer une lettre de motivation PDF  │
+│ POST /analysis/{id}/apply          │ Métadonnées pour postuler (job_index) │
+│ GET  /health                       │ Status de l'API                       │
+└────────────────────────────────────┴───────────────────────────────────────┘
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  UPLOAD CV — FLUX DÉTAILLÉ (POST /analysis/upload)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. FastAPI reçoit le PDF + les filtres (keywords, location, contract_type, etc.)
+2. Validation :
+   - Fichier = PDF obligatoire
+   - Taille ≤ MAX_FILE_SIZE_MB (10 MB par défaut)
+   - contract_type ∈ {cdi, cdd, stage, alternance, freelance, temps_partiel, ""}
+   - date_posted ∈ {today, 3days, week, month, ""}
+   - experience_level ∈ {junior, mid, senior, ""}
+
+3. Stockage du PDF :
+   - Si S3_BUCKET configuré → upload sur AWS S3
+   - Sinon → sauvegarde locale dans uploads/
+   - Clé : "cvs/{user_id}/{cv_id}.pdf"
+
+4. Création en base :
+   - CV record (table "cvs") — référence au fichier stocké
+   - Analysis record (table "analyses") — status="processing"
+
+5. Enqueue : run_pipeline.delay(...) → tâche envoyée dans Redis
+   Retour immédiat : 202 Accepted + l'objet analysis (id, status="processing")
+
+6. Le worker Celery reçoit la task et exécute le pipeline (détails ci-dessous)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  RÔLE DE CELERY (app/worker/)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Celery est un système de files d'attente de tâches. Il permet d'exécuter des
+traitements lourds (IA, appels API) dans des processus séparés, sans bloquer
+FastAPI.
+
+Configuration (app/worker/celery_app.py) :
+  - Broker  : Redis (redis://localhost:6379/0) — reçoit les tasks
+  - Backend : Redis — stocke les résultats
+  - Sérialisation : JSON
+  - task_acks_late = True — confirme la task APRÈS exécution (plus sûr)
+  - worker_prefetch_multiplier = 1 — un seul job à la fois par worker
+
+Commande pour lancer un worker :
+  celery -A app.worker.celery_app worker --loglevel=info
+
+
+TASKS DÉFINIES (app/worker/tasks.py) :
+
+┌────────────────────────────────────┬──────────────────────────────────────┐
+│ run_pipeline                       │ Pipeline IA complet pour une analyse │
+│ full_ingestion                     │ Nourrit le Cortex avec seeds keywords│
+│ feed_cortex_from_fallback          │ Stocke les offres trouvées par users │
+│ cleanup_old_jobs                   │ Supprime les offres Cortex obsolètes │
+└────────────────────────────────────┴──────────────────────────────────────┘
+
+Crons automatiques (Celery Beat) :
+  - 02h00 chaque nuit  → full_ingestion (enrichir le Cortex)
+  - 03h00 chaque dimanche → cleanup_old_jobs (supprimer offres > 30 jours)
+
+Commande Celery Beat (scheduler) :
+  celery -A app.worker.celery_app beat --loglevel=info
+
+Commande Flower (monitoring web, port 5555) :
+  celery -A app.worker.celery_app flower --port=5555
+
+
+POINT TECHNIQUE IMPORTANT — asyncpg dans Celery :
+  asyncpg lie ses connexions à l'event loop qui les a créées.
+  Chaque appel asyncio.run() crée un NOUVEAU event loop.
+  Si le worker réutilise les mêmes engines SQLAlchemy entre deux tasks,
+  les connexions du pool appartiennent au loop précédent → crash.
+  FIX : engine.sync_engine.dispose() avant chaque asyncio.run()
+  → le pool est vidé, les nouvelles connexions se créent dans le bon loop.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  LE PIPELINE LANGGRAPH (app/pipeline/)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+LangGraph est un framework pour construire des pipelines IA sous forme de graphe
+orienté. Chaque nœud est une fonction async qui reçoit l'état global et renvoie
+un dict qui met à jour cet état.
+
+FLUX DU PIPELINE :
+
+  pdf_parser
+      │
+  cv_structurer
+      │
+  keyword_extractor
+      │
+  job_search (Adzuna API)
+      │
+      ├─── jobs trouvés ──► cortex_feed (fire & forget → Celery)
+      │                          │
+      │                     embeddings_filter
+      │                          │
+      │                     llm_reranker
+      │                          │
+      │                     report_generator ──► FIN
+      │
+      ├─── vide + tentatives restantes ──► prepare_retry ──► keyword_extractor (boucle)
+      │
+      └─── vide + max tentatives (2) ──► report_generator (rapport vide) ──► FIN
+
+
+DÉTAIL DE CHAQUE NŒUD :
+
+[1] pdf_parser (app/pipeline/nodes/pdf_parser.py)
+    → Lit le PDF depuis S3 ou le disque
+    → Extrait le texte brut avec pdfplumber ou PyMuPDF
+    → Sortie : cv_text (str)
+
+[2] cv_structurer (app/pipeline/nodes/cv_structurer.py)
+    → Envoie cv_text à GPT-4o-mini avec un prompt structuré
+    → Extrait : full_name, roles[], skills[], level, experience_years,
+                experiences[], education[], languages[], location, summary
+    → Sortie : cv_json (dict)
+
+[3] keyword_extractor (app/pipeline/nodes/keyword_extractor.py)
+    → Sur la première passe : génère 3-6 requêtes de recherche à partir du profil CV
+      (ex: "Senior Python Developer", "ML Engineer PyTorch")
+    → Sur retry : génère des requêtes DIFFÉRENTES et plus larges
+      (exclut les keywords qui ont échoué, température LLM plus haute = plus créatif)
+    → Merge avec les user_keywords fournis à l'upload (user_keywords en priorité)
+    → Maximum 10 keywords au total
+    → Sortie : keywords[] (list[str])
+
+[4] job_search (app/pipeline/nodes/job_search.py)
+    → Pour chaque keyword × chaque location → 1 appel Adzuna API
+    → Semaphore : 4 appels max en parallèle + 0.3s de délai entre slots
+    → Déduplique les offres (clé = titre + entreprise)
+    → Si 0 résultat en DEBUG : utilise des données mock
+    → Sortie : jobs[] (list[dict])
+    → Chaque job : {title, company, location, desc, url, date, contract_type, remote}
+
+[5] cortex_feed (app/pipeline/nodes/cortex_feed.py)  [FIRE & FORGET]
+    → Envoie les jobs trouvés à Celery (feed_cortex_from_fallback.delay())
+    → N'attend pas la fin — le pipeline continue immédiatement
+    → Ces jobs seront enrichis (séniorité LLM) et stockés dans le Cortex
+    → But : auto-alimenter l'index vectoriel à partir des vraies recherches users
+    → Sortie : {} (pas de modification d'état)
+
+[6] embeddings_filter (app/pipeline/nodes/embeddings_filter.py)
+    → Embed le profil CV (roles + skills + level + summary)
+    → Embed tous les jobs (titre + description)
+    → 1 seul appel API OpenAI (batch) : text-embedding-3-small
+    → Calcule la similarité cosinus CV ↔ chaque job
+    → Garde uniquement les jobs avec score ≥ moyenne
+    → Garantit au moins 5 jobs pour le reranker
+    → Sortie : filtered_jobs[] (triés par score desc, avec _score)
+
+[7] llm_reranker (app/pipeline/nodes/llm_reranker.py)
+    → Envoie le profil CV + les jobs filtrés à GPT-4o-mini
+    → Batches de 30 jobs max, 2 batches en parallèle (= 60 jobs max)
+    → Output structuré (Pydantic) : score 0-10, matching_skills, missing_skills, reason
+    → Tient compte du niveau d'expérience ciblé (junior/mid/senior)
+    → Garde les matches avec score ≥ 5, minimum 3 résultats
+    → Sortie : matches[] (triés par score desc)
+
+[prepare_retry] (déclenchée si 0 jobs trouvés)
+    → Incrémente search_attempts
+    → Tentative 1 : supprime les locations (cherche sans contrainte géo)
+    → Tentative 2 : supprime aussi le contract_type
+    → Enregistre les keywords échoués dans failed_keywords
+    → Repart sur keyword_extractor avec de nouveaux keywords
+    → Maximum 2 retries (MAX_SEARCH_ATTEMPTS = 2)
+
+[8] report_generator (app/pipeline/nodes/report_generator.py)
+    → Génère un rapport Markdown complet avec GPT-4o-mini
+    → Contient : résumé candidat, top matches (score, pourquoi, skills),
+                 analyse des gaps de compétences, recommandations
+    → Langue du rapport = langue du CV (détectée automatiquement)
+    → Sortie : final_report (str Markdown)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STREAMING SSE — PROGRESSION EN TEMPS RÉEL (app/analysis/progress.py)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Problème : le pipeline tourne dans Celery (process séparé).
+FastAPI doit quand même streamer la progression au browser.
+Solution : Redis comme bus de communication inter-processus.
+
+CÔTÉ WORKER (publier) :
+  Après chaque nœud LangGraph :
+    1. RPUSH  pipeline:history:{id}  → ajoute l'event dans une LIST Redis (replay)
+    2. EXPIRE pipeline:history:{id} 3600  → TTL 1h
+    3. PUBLISH pipeline:progress:{id}  → publie sur le channel pub/sub
+
+  Event format : {"node": "embeddings_filter", "label": "Filtrage sémantique"}
+  Event final  : {"done": true}
+
+CÔTÉ FASTAPI (souscrire) :
+  GET /analysis/{id}/stream → SSE endpoint
+
+  Algorithme race-condition safe :
+    1. S'abonne au channel Redis PUB/SUB en PREMIER
+    2. LRANGE pipeline:history:{id} → rejoue tous les events passés
+       (pour les clients qui se connectent après que le pipeline a avancé)
+    3. Si "done" dans l'historique → retourne immédiatement
+    4. Sinon → écoute les nouveaux events via pubsub.listen()
+    5. Timeout 600s (10 min)
+
+  Pourquoi souscrire AVANT lire l'historique ?
+  Sans ça : si "done" est publié entre lrange et subscribe → event perdu.
+
+Labels affichés au frontend :
+  pdf_parser        → "Lecture du CV"
+  cv_structurer     → "Analyse du profil"
+  keyword_extractor → "Extraction des mots-clés"
+  job_search        → "Recherche d'offres"
+  cortex_feed       → "Mise à jour Cortex"
+  prepare_retry     → "Nouvelle tentative"
+  embeddings_filter → "Filtrage sémantique"
+  llm_reranker      → "Classement IA"
+  report_generator  → "Génération du rapport"
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  LE CORTEX (app/cortex/)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Le Cortex est un index vectoriel centralisé d'offres d'emploi, partagé entre
+tous les utilisateurs. Il est alimenté en arrière-plan et peut servir de
+cache pour éviter des appels API répétés.
+
+BASE DE DONNÉES : PostgreSQL + extension pgvector
+  Table "cortex_jobs" :
+    - id, title, company, location, description
+    - source (adzuna), url, date_posted
+    - seniority (junior/mid/senior) — détecté par LLM à l'ingestion
+    - embedding (vector 1536 dims) — text-embedding-3-small
+    - contract_type, remote, keywords[], domain
+    - created_at, last_seen, is_active
+
+ALIMENTATION :
+  1. Cron nightly (full_ingestion) :
+     - Parcourt 130+ seed keywords (app/cortex/seeds.py)
+     - 16 domaines : data-science, dev-backend, devops, cybersec, etc.
+     - Cherche via Adzuna pour chaque keyword
+     - Déduplique (hash title+company+location)
+     - Détecte la séniorité par LLM (GPT-4o-mini, batches de 30)
+     - Embed les nouvelles offres
+     - Stocke dans cortex_jobs
+
+  2. Auto-alimentation par les vraies recherches users :
+     - Quand le pipeline trouve des jobs via Adzuna, cortex_feed_node
+       les envoie à feed_cortex_from_fallback.delay() (Celery)
+     - Ce task les enrichit et les stocke dans le Cortex
+     - Le Cortex grandit avec les vraies recherches → plus pertinent avec le temps
+
+NETTOYAGE :
+  Chaque dimanche : cleanup_old_jobs
+  - Désactive les offres non vues depuis 30 jours
+  - Purge les offres inactives depuis 90 jours
+
+ENDPOINTS ADMIN (/cortex) :
+  - POST /cortex/ingest/full  → déclenche full_ingestion manuellement
+  - DELETE /cortex/jobs/cleanup → déclenche cleanup manuellement
+  Protégés par _require_admin : seuls les emails dans ADMIN_EMAILS peuvent y accéder.
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STOCKAGE CV (app/storage.py)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Abstraction unique — même interface, deux backends :
+
+  Si S3_BUCKET configuré → AWS S3
+    - put_object : upload le PDF
+    - get_presigned_url : URL signée temporaire (expire après N minutes)
+    - GET /analysis/{id}/cv → RedirectResponse 302 vers l'URL S3
+    - IMPORTANT : ne jamais cacher l'URL côté client, toujours rappeler l'endpoint
+
+  Si S3_BUCKET vide → disque local
+    - Sauvegarde dans UPLOAD_DIR/ (default: "uploads/")
+    - GET /analysis/{id}/cv → StreamingResponse (lecture directe)
+
+Format de la clé : "cvs/{user_id}/{cv_id}.pdf"
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  LETTRE DE MOTIVATION (app/cover_letter/)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+POST /analysis/{id}/cover-letter?job_index=0
+
+Flux :
+  1. Récupère l'analyse + le job ciblé (job_index dans matches[])
+  2. Récupère le CV structuré (cv_json)
+  3. LLM génère un CoverLetterContent (Pydantic) :
+     sender, recipient, paragraphs (avec labels de purpose), tone,
+     highlighted_skills, key_selling_point
+  4. Backend PDF génère le document :
+     - reportlab (défaut) : pur Python, pas de dépendances système
+     - weasyprint : HTML/CSS → PDF, plus beau mais nécessite libpango
+  5. Retourne le PDF en bytes
+
+Choix du backend : COVER_LETTER_BACKEND=reportlab ou weasyprint dans .env
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  AUTHENTIFICATION (app/auth/)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+- Système JWT (JSON Web Token)
+- POST /auth/register → crée le user, hash le password (bcrypt)
+- POST /auth/login → vérifie le password, retourne un token JWT
+- Token expire après ACCESS_TOKEN_EXPIRE_MINUTES (60 min par défaut)
+- Toutes les routes protégées vérifient le token via Depends(get_current_user)
+- Mot de passe minimum 8 caractères
+- SECRET_KEY obligatoire en prod (sys.exit si valeur par défaut en non-DEBUG)
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  BASE DE DONNÉES PRINCIPALE (app/db/)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Stack : PostgreSQL + SQLAlchemy async + asyncpg
+URL : DATABASE_URL=postgresql+asyncpg://user:pass@host:5432/dbname
+Note : port 5432 obligatoire (pas 6543 — le pooler Supabase est incompatible)
+
+TABLES :
+  users     : id (UUID), email, hashed_password, is_active, created_at
+              → relationship → analyses[]
+  cvs       : id, user_id (FK), pdf_path, raw_text, data (JSON), created_at
+  analyses  : id, user_id (FK), cv_id (FK), status, error,
+              search_filters (JSON), keywords (JSON), matches (JSON),
+              final_report (Text), created_at, updated_at
+              status : pending → processing → completed | failed
+
+Gestion des sessions :
+  - AsyncSessionLocal : session factory pour FastAPI (avec rollback auto)
+  - Même engine réutilisé par FastAPI tout au long de la vie du process
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  MODÈLES IA UTILISÉS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  GPT-4o-mini (OPENAI_MODEL)
+    - cv_structurer : extraction du profil CV
+    - keyword_extractor : génération des requêtes de recherche
+    - llm_reranker : scoring et analyse des offres
+    - report_generator : rédaction du rapport Markdown
+    - enricher : détection séniorité (ingestion Cortex)
+    - cover_letter : génération lettre de motivation
+
+  text-embedding-3-small (OPENAI_EMBEDDING_MODEL, 1536 dims)
+    - embeddings_filter : similarité CV ↔ offres
+    - ingestion Cortex : vectorisation des offres pour stockage
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  FOURNISSEUR D'OFFRES D'EMPLOI
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Adzuna (seul provider actif)
+    - API REST : api.adzuna.com
+    - Credentials : ADZUNA_APP_ID + ADZUNA_APP_KEY
+    - Country : ADZUNA_COUNTRY=fr (offres françaises)
+    - Semaphore : 4 appels simultanés max + 0.3s entre chaque slot
+    - Filtres supportés : location, contract_type, max_days_old
+    - 10 résultats par requête
+
+  Mapping contrats vers Adzuna :
+    cdi → permanent | cdd → contract | freelance → contract
+    stage/alternance → pas de filtre (Adzuna ne les supporte pas)
+    temps_partiel → part_time
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SCALABILITÉ — COMMENT AJOUTER DES WORKERS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Principe : Redis est le point central. Toutes les machines pointent dessus.
+
+  Machine A (FastAPI)  →  Redis (broker)  ←  Machine B (Worker)
+                                           ←  Machine C (Worker)
+                                           ←  Machine D (Worker)
+
+Sur chaque machine worker :
+  1. git clone + pip install -r requirements.txt
+  2. Copier le .env (même REDIS_URL, même DATABASE_URL)
+  3. celery -A app.worker.celery_app worker --loglevel=info
+
+Pour Docker : même image, commandes différentes :
+  FastAPI : uvicorn app.main:app --host 0.0.0.0 --port 8000
+  Worker  : celery -A app.worker.celery_app worker
+  Scale   : docker-compose up --scale worker=5
+
+Redis partagé recommandé en prod : Upstash, Railway Redis, ou Redis Cloud
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  LANCER L'APPLICATION EN LOCAL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+3 terminaux obligatoires :
+
+  Terminal 1 — FastAPI :
+    uvicorn app.main:app --reload
+
+  Terminal 2 — Celery Worker :
+    celery -A app.worker.celery_app worker --loglevel=info
+
+  Terminal 3 — Celery Beat (crons, optionnel) :
+    celery -A app.worker.celery_app beat --loglevel=info
+
+  Terminal 4 — Flower (monitoring, optionnel) :
+    celery -A app.worker.celery_app flower --port=5555
+    → dashboard sur http://localhost:5555
+
+  Prérequis :
+    - Redis sur localhost:6379 (redis-server ou Docker)
+    - PostgreSQL avec les URLs configurées dans .env
+    - Variables d'env : OPENAI_API_KEY, ADZUNA_APP_ID, ADZUNA_APP_KEY
+
+================================================================================

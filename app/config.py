@@ -32,7 +32,6 @@ class Settings(BaseSettings):
     CORTEX_DATABASE_URL: str = ""  # postgresql+asyncpg://user:pass@host:5432/postgres
     REDIS_URL: str = "redis://localhost:6379/0"
 
-    JSEARCH_API_KEY: str = ""
     ADZUNA_APP_ID: str = ""
     ADZUNA_APP_KEY: str = ""
     ADZUNA_COUNTRY: str = "fr"

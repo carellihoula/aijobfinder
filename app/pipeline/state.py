@@ -9,8 +9,9 @@ class PipelineState(TypedDict):
     cv_json: Optional[dict]  # structured CV data as plain dict (from cv_structurer)
     user_keywords: list[str]
     keywords: list[str]
-    # Search filters (user-provided, override CV data)
-    user_locations: list[str]   # overrides CV location if non-empty
+    # Search filters (user-provided at upload time)
+    # Priority: user_locations > cv_json.location > no filter (all France)
+    user_locations: list[str]   # explicit location from profile config
     contract_type: str          # cdi | cdd | stage | alternance | freelance | temps_partiel | ""
     remote: bool                # True = remote only
     date_posted: str            # today | 3days | week | month | "" (all)

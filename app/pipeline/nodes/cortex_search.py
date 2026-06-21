@@ -46,10 +46,10 @@ async def cortex_search_node(state: PipelineState) -> dict:
         return {"filtered_jobs": []}
 
     cv = state.get("cv_json") or {}
+    user_locations: list[str] = state.get("user_locations") or []
     contract_type: str = state.get("contract_type") or ""
     remote: bool = state.get("remote") or False
     experience_level: str = state.get("experience_level") or ""
-    user_locations: list[str] = state.get("user_locations") or []
     user_keywords: list[str] = state.get("user_keywords") or []
 
     cv_query = _build_cv_query(cv, experience_level, user_keywords)
@@ -57,9 +57,18 @@ async def cortex_search_node(state: PipelineState) -> dict:
         logger.warning("[cortex_search] Empty CV profile — triggering fallback")
         return {"filtered_jobs": []}
 
+    # Same priority as job_search: profile config > CV location > no filter
+    if user_locations:
+        effective_locations = user_locations
+    else:
+        from app.pipeline.nodes.job_search import _clean_location
+        raw_cv_loc: str = cv.get("location", "") or ""
+        cleaned_cv_loc = _clean_location(raw_cv_loc)
+        effective_locations = [cleaned_cv_loc] if cleaned_cv_loc else None
+
     logger.info(
         "[cortex_search] Embedding CV query (%d chars) — contract=%s, remote=%s, seniority=%s, locations=%s",
-        len(cv_query), contract_type or "all", remote, experience_level or "all", user_locations,
+        len(cv_query), contract_type or "all", remote, experience_level or "all", effective_locations,
     )
 
     embedder = OpenAIEmbeddings(
@@ -76,7 +85,7 @@ async def cortex_search_node(state: PipelineState) -> dict:
             contract_type=contract_type,
             remote=remote,
             seniority=experience_level,
-            locations=user_locations if user_locations else None,
+            locations=effective_locations,
         )
 
     logger.info("[cortex_search] %d jobs retrieved from Cortex", len(jobs))
