@@ -145,6 +145,33 @@ async def get_latest_analysis(
     return analysis
 
 
+@router.get("/cv-data")
+async def get_cv_data(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the structured CV JSON from the user's latest CV upload."""
+    cv = await cv_svc.get_latest_cv_for_user(db, current_user.id)
+    if not cv or not cv.data:
+        raise HTTPException(status_code=404, detail="No CV data found")
+    return cv.data
+
+
+@router.patch("/cv-data")
+async def update_cv_data(
+    payload: dict,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Partially update the structured CV JSON for the user's latest CV."""
+    cv = await cv_svc.get_latest_cv_for_user(db, current_user.id)
+    if not cv:
+        raise HTTPException(status_code=404, detail="No CV found")
+    merged = {**(cv.data or {}), **payload}
+    await cv_svc.update_cv(db, cv.id, data=merged)
+    return merged
+
+
 @router.get("/{analysis_id}", response_model=AnalysisResponse)
 async def get_analysis(
     analysis_id: UUID,
