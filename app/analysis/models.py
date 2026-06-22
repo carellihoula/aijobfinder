@@ -23,7 +23,10 @@ class Analysis(Base):
     matches = Column(JSON, nullable=True)
     final_report = Column(Text, nullable=True)
 
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_at           = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at           = Column(DateTime(timezone=True), onupdate=func.now())
+    # Set to cortex_updated_at each time this analysis is refreshed against the Cortex.
+    # NULL = never refreshed. Used to skip re-analysis when Cortex has no new data.
+    cortex_snapshot_at   = Column(DateTime(timezone=True), nullable=True)
 
     user = relationship("User", back_populates="analyses")

@@ -29,7 +29,7 @@ async def run_ingestion_from_registry(locations: list[str] | None = None) -> dic
         return {"fetched": 0, "new": 0, "stored": 0}
 
     logger.info("[ingestion] Registry ingestion — %d keywords", len(keywords))
-    return await run_ingestion(keywords, locations, date_posted="3")
+    return await run_ingestion(keywords, locations, date_posted="month")
 
 
 async def run_seed_ingestion(keywords: list[str], locations: list[str] | None = None) -> dict:
@@ -153,6 +153,9 @@ async def run_ingestion(keywords: list[str], locations: list[str] | None = None,
         "[ingestion] Done — fetched=%d, new=%d, stored=%d",
         len(raw_jobs), len(new_jobs), stored,
     )
+    if stored > 0:
+        from app.cortex.registry import set_cortex_updated_at
+        await set_cortex_updated_at()
     return {"fetched": len(raw_jobs), "new": len(new_jobs), "stored": stored}
 
 

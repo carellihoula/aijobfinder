@@ -22,3 +22,18 @@ async def create_user(db: AsyncSession, email: str, hashed_password: str, full_n
     await db.commit()
     await db.refresh(user)
     return user
+
+
+async def get_all_users(db: AsyncSession) -> list[User]:
+    result = await db.execute(select(User).order_by(User.created_at.desc()))
+    return list(result.scalars().all())
+
+
+async def set_admin_status(db: AsyncSession, user_id: UUID, is_admin: bool) -> User | None:
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user:
+        user.is_admin = is_admin
+        await db.commit()
+        await db.refresh(user)
+    return user

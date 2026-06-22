@@ -17,6 +17,7 @@ class CV(Base):
     source = Column(String, default="upload", nullable=False)  # upload | manual | ai
 
     pdf_path = Column(String, nullable=True)           # storage key (local path or S3 key)
+    pdf_hash = Column(String(64), nullable=True)       # SHA-256 of the PDF content
     raw_text = Column(String, nullable=True)           # original extracted text
     data = Column(JSON, nullable=False)                # CVSchema stored as JSON
 

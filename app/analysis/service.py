@@ -1,6 +1,7 @@
+from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analysis.models import Analysis
@@ -26,6 +27,42 @@ async def get_user_analyses(db: AsyncSession, user_id: UUID) -> list[Analysis]:
         select(Analysis).where(Analysis.user_id == user_id).order_by(Analysis.created_at.desc())
     )
     return list(result.scalars().all())
+
+
+async def get_latest_analysis_for_user(db: AsyncSession, user_id: UUID) -> Analysis | None:
+    """Return the most recent analysis for this user (any status)."""
+    result = await db.execute(
+        select(Analysis)
+        .where(Analysis.user_id == user_id)
+        .order_by(Analysis.created_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_stale_analyses(db: AsyncSession, cortex_updated_at: datetime) -> list[Analysis]:
+    """Return completed analyses whose cortex snapshot is older than cortex_updated_at."""
+    result = await db.execute(
+        select(Analysis).where(
+            Analysis.status == "completed",
+            Analysis.cv_id.isnot(None),
+            or_(
+                Analysis.cortex_snapshot_at.is_(None),
+                Analysis.cortex_snapshot_at < cortex_updated_at,
+            ),
+        )
+    )
+    return list(result.scalars().all())
+
+
+async def get_latest_completed_analysis_for_cv(db: AsyncSession, cv_id: UUID) -> Analysis | None:
+    result = await db.execute(
+        select(Analysis)
+        .where(Analysis.cv_id == cv_id, Analysis.status == "completed")
+        .order_by(Analysis.created_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
 
 
 async def update_analysis(db: AsyncSession, analysis_id: UUID, **kwargs) -> Analysis | None:

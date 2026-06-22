@@ -30,10 +30,16 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(hour=2, minute=0),
         "kwargs": {"locations": None},
     },
-    # Cleanup old jobs every Sunday at 3am — deactivate jobs not seen in 30 days
+    # Per-user nightly refresh — runs after ingestion (2h), checks each stale analysis.
+    # Calls LLM only when the Cortex has new jobs not yet seen by this user.
+    "refresh-user-analyses-nightly": {
+        "task": "app.worker.tasks.refresh_user_analyses",
+        "schedule": crontab(hour=3, minute=0),
+    },
+    # Cleanup old jobs every Sunday at 4am — deactivate jobs not seen in 30 days
     "cortex-cleanup-weekly": {
         "task": "app.worker.tasks.cleanup_old_jobs",
-        "schedule": crontab(hour=3, minute=0, day_of_week=0),
+        "schedule": crontab(hour=4, minute=0, day_of_week=0),
         "kwargs": {"days": 30},
     },
 }

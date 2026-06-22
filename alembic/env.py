@@ -21,7 +21,18 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Inject the URL from app settings — single source of truth
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+# % must be escaped as %% to avoid ConfigParser interpolation errors (e.g. %40 in passwords)
+config.set_main_option("sqlalchemy.url", settings.DATABASE_URL.replace("%", "%%"))
+
+# Tables managed by a separate engine (CORTEX_DATABASE_URL) — exclude from autogenerate
+_CORTEX_TABLES = {"cortex_jobs"}
+
+
+def include_object(obj, name, type_, reflected, compare_to):
+    if type_ == "table" and name in _CORTEX_TABLES:
+        return False
+    return True
+
 
 target_metadata = Base.metadata
 
@@ -40,7 +51,7 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata)
+    context.configure(connection=connection, target_metadata=target_metadata, include_object=include_object)
     with context.begin_transaction():
         context.run_migrations()
 

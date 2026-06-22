@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -6,6 +7,16 @@ from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.logger import get_logger
+
+_FRENCH_MONTHS = [
+    "janvier", "février", "mars", "avril", "mai", "juin",
+    "juillet", "août", "septembre", "octobre", "novembre", "décembre",
+]
+
+
+def _today_fr() -> str:
+    now = datetime.now()
+    return f"{now.day} {_FRENCH_MONTHS[now.month - 1]} {now.year}"
 
 logger = get_logger(__name__)
 
@@ -77,7 +88,7 @@ class CoverLetterContent(BaseModel):
     )
 
 
-# ── System prompt ─────────────────────────────────────────────────────────────
+# ── System prompts ────────────────────────────────────────────────────────────
 
 _SYSTEM_PROMPT = """\
 You are an expert career coach and professional writer specializing in French cover letters.
@@ -97,18 +108,39 @@ dynamic for tech/startups, creative for design/media
   • call_to_action — strong closing: reinforce fit, request interview, show availability
 - Each paragraph: 4–5 sentences, 80–110 words. Be specific, avoid clichés, no filler.
 - closing: 1 short impactful sentence (e.g. "Je serais ravi(e) de vous présenter ma candidature lors d'un entretien.")
-- city_date format: "Ville, J mois YYYY" (e.g. "Paris, 15 juin 2026")
+- city_date format: "Ville, J mois YYYY" — use EXACTLY today's date: {today}
 - If candidate location has multiple parts, use the first city only
 - Extract sender info from the candidate profile (use empty string if missing)
 - highlighted_skills: pick the 3–5 skills most relevant to THIS specific job
 - key_selling_point: one punchy sentence that captures the candidate's unique value for this role
 """
 
+_REFINE_SYSTEM_PROMPT = """\
+You are an expert career coach and professional writer specializing in French cover letters.
 
-async def generate_cover_letter(cv: dict, job: dict) -> CoverLetterContent:
+You are given a cover letter that was already generated and the user wants to refine it. \
+Your job is to apply the user's refinement instructions while preserving everything that works well.
+
+Rules:
+- Keep every part the user did NOT ask to change — do not rewrite for the sake of it
+- Apply the refinement instructions precisely and only where requested
+- If no explicit instruction targets a specific paragraph, keep it as-is (same wording)
+- ALL text fields must be written in French
+- city_date format: "Ville, J mois YYYY" — use EXACTLY today's date: {today}
+- highlighted_skills, tone and key_selling_point should only change if the instructions imply it
+"""
+
+
+async def generate_cover_letter(
+    cv: dict,
+    job: dict,
+    suggestion: str = "",
+    previous_content: dict | None = None,
+) -> CoverLetterContent:
     """
-    Agent: takes raw CV dict + job dict, returns a fully structured CoverLetterContent.
-    The output JSON is self-contained — PDF backends only need this object.
+    Generates or refines a cover letter.
+    When previous_content is provided the LLM refines the existing letter instead of
+    generating from scratch — only the parts targeted by suggestion are changed.
     """
     llm = ChatOpenAI(
         model=settings.OPENAI_MODEL,
@@ -116,21 +148,28 @@ async def generate_cover_letter(cv: dict, job: dict) -> CoverLetterContent:
         api_key=settings.OPENAI_API_KEY,
     ).with_structured_output(CoverLetterContent)
 
-    messages = [
-        SystemMessage(content=_SYSTEM_PROMPT),
-        HumanMessage(content=(
+    if previous_content:
+        system = _REFINE_SYSTEM_PROMPT.format(today=_today_fr())
+        human = (
             f"## Candidate profile\n{_format_cv(cv)}\n\n"
-            f"## Job offer\n{_format_job(job)}"
-        )),
-    ]
+            f"## Job offer\n{_format_job(job)}\n\n"
+            f"## Current cover letter (to refine)\n{_format_previous_content(previous_content)}\n\n"
+            f"## Refinement instructions\n{suggestion.strip() or 'Améliore globalement la lettre sans changer sa structure.'}"
+        )
+    else:
+        system = _SYSTEM_PROMPT.format(today=_today_fr())
+        human = f"## Candidate profile\n{_format_cv(cv)}\n\n## Job offer\n{_format_job(job)}"
+        if suggestion.strip():
+            human += f"\n\n## Modification request\n{suggestion.strip()}"
 
+    messages = [SystemMessage(content=system), HumanMessage(content=human)]
     content: CoverLetterContent = await llm.ainvoke(messages)
 
     logger.info(
-        "[cover_letter_agent] done — tone=%s paragraphs=%d skills=%s",
+        "[cover_letter_agent] %s — tone=%s paragraphs=%d",
+        "refined" if previous_content else "generated",
         content.tone,
         len(content.paragraphs),
-        content.highlighted_skills,
     )
     return content
 
@@ -187,4 +226,21 @@ def _format_job(job: dict) -> str:
     ]
     if job.get("desc"):
         lines.append(f"Description:\n{job['desc'][:600]}")
+    return "\n".join(lines)
+
+
+def _format_previous_content(content: dict) -> str:
+    """Serialize a CoverLetterContent dict into a readable format for the refinement prompt."""
+    lines = [
+        f"Subject: {content.get('subject', '')}",
+        f"Tone: {content.get('tone', '')}",
+        f"Key selling point: {content.get('key_selling_point', '')}",
+        "",
+    ]
+    for i, para in enumerate(content.get("paragraphs", []), 1):
+        purpose = para.get("purpose", f"paragraph_{i}")
+        text = para.get("text", "")
+        lines.append(f"[{purpose}]\n{text}")
+        lines.append("")
+    lines.append(f"Closing: {content.get('closing', '')}")
     return "\n".join(lines)
