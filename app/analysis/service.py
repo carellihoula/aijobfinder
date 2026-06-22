@@ -55,6 +55,18 @@ async def get_stale_analyses(db: AsyncSession, cortex_updated_at: datetime) -> l
     return list(result.scalars().all())
 
 
+async def get_analysis_by_id(db: AsyncSession, analysis_id: UUID) -> Analysis | None:
+    """Admin-level lookup — no user_id filter."""
+    result = await db.execute(select(Analysis).where(Analysis.id == analysis_id))
+    return result.scalar_one_or_none()
+
+
+async def get_all_analyses(db: AsyncSession) -> list[Analysis]:
+    """Return all analyses ordered by most recent. Admin only."""
+    result = await db.execute(select(Analysis).order_by(Analysis.created_at.desc()))
+    return list(result.scalars().all())
+
+
 async def get_latest_completed_analysis_for_cv(db: AsyncSession, cv_id: UUID) -> Analysis | None:
     result = await db.execute(
         select(Analysis)

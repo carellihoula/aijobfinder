@@ -13,15 +13,16 @@ def _dispose_engines() -> None:
     asyncpg connections are bound to the event loop that created them.
     When Celery runs a second task in the same worker process, asyncio.run()
     creates a new loop — old pool connections raise "Future attached to a
-    different loop". dispose() clears the pool so fresh connections are made
-    on the current loop.
+    different loop". dispose(close=False) drops pool references without
+    trying to close asyncpg connections (which would fail outside a greenlet).
+    New connections are created fresh on the current loop.
     """
     from app.db.session import engine
-    engine.sync_engine.dispose()
+    engine.sync_engine.dispose(close=False)
     try:
         from app.cortex.db import cortex_engine
         if cortex_engine is not None:
-            cortex_engine.sync_engine.dispose()
+            cortex_engine.sync_engine.dispose(close=False)
     except Exception:
         pass
 

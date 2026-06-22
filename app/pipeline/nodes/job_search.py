@@ -100,7 +100,7 @@ async def _search_adzuna(
             "title": item.get("title", ""),
             "company": item.get("company", {}).get("display_name", ""),
             "location": _clean_location(item.get("location", {}).get("display_name", "")),
-            "desc": (item.get("description", "") or "")[:500],
+            "desc": (item.get("description", "") or ""),
             "url": item.get("redirect_url", ""),
             "date": item.get("created", ""),
             "contract_type": _EMPLOYMENT_DISPLAY.get(item.get("contract_type", ""), ""),
