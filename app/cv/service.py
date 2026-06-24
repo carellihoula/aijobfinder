@@ -56,3 +56,16 @@ async def update_cv(db: AsyncSession, cv_id: UUID, **kwargs) -> CV | None:
 async def get_cv(db: AsyncSession, cv_id: UUID) -> CV | None:
     result = await db.execute(select(CV).where(CV.id == cv_id))
     return result.scalar_one_or_none()
+
+
+async def get_previous_cv_for_user(db: AsyncSession, user_id: UUID, exclude_cv_id: UUID) -> CV | None:
+    """Return the most recent CV for this user that is NOT the given cv_id.
+    Used to retrieve user-curated profile data when a new CV is uploaded.
+    """
+    result = await db.execute(
+        select(CV)
+        .where(CV.user_id == user_id, CV.id != exclude_cv_id, CV.pdf_path.isnot(None))
+        .order_by(CV.created_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()

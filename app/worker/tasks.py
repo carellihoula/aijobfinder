@@ -27,11 +27,194 @@ def _dispose_engines() -> None:
         pass
 
 
+def _merge_prev_profile(cv_json: dict, prev_data: dict) -> dict:
+    """Preserve user-curated profile fields when a new CV replaces the old one."""
+    if prev_data.get("roles"):
+        cv_json["roles"] = prev_data["roles"]
+    prev_skills = set(prev_data.get("skills") or [])
+    new_skills  = set(cv_json.get("skills") or [])
+    cv_json["skills"] = list(new_skills | prev_skills)
+    if prev_data.get("hobbies") and not cv_json.get("hobbies"):
+        cv_json["hobbies"] = prev_data["hobbies"]
+    return cv_json
+
+
+# ─── Task: init_profile ───────────────────────────────────────────────────────
+# Runs pdf_parser + cv_structurer only. Called on CV upload (one-time onboarding).
+# No job search — just populates cv.data from the PDF.
+
+@celery_app.task(
+    name="app.worker.tasks.init_profile",
+    bind=True,
+    max_retries=0,
+    time_limit=120,
+    soft_time_limit=100,
+)
+def init_profile(self, cv_id: str, user_id: str, pdf_path: str) -> dict:
+    """Extract and structure CV data from a PDF. Progress events keyed on cv_id."""
+    import app.users.models    # noqa: F401
+    import app.cv.models       # noqa: F401
+    import app.analysis.models # noqa: F401
+
+    from app.analysis import progress as prog
+    from app.cv import service as cv_svc
+    from app.db.session import AsyncSessionLocal
+    from app.pipeline.graph import profile_init_pipeline
+
+    logger.info("[init_profile] started — cv_id=%s", cv_id)
+
+    async def _run() -> None:
+        state = {
+            "pdf_path": pdf_path, "cv_text": "", "cv_json": None,
+            "user_keywords": [], "keywords": [], "user_locations": [],
+            "contract_type": "", "remote": False, "date_posted": "",
+            "experience_level": "", "failed_keywords": [], "search_attempts": 0,
+            "jobs": [], "filtered_jobs": [], "matches": [], "final_report": "",
+            "messages": [],
+        }
+        try:
+            accumulated: dict = dict(state)
+            async for chunk in profile_init_pipeline.astream(state, stream_mode="updates"):
+                node_name = next(iter(chunk))
+                node_output = chunk[node_name]
+                if node_output is not None:
+                    await prog.publish(cv_id, node_name)
+                    accumulated.update(node_output)
+
+            await prog.publish_done(cv_id)
+
+            cv_json: dict = accumulated.get("cv_json") or {}
+
+            # Preserve user edits from previous CV
+            async with AsyncSessionLocal() as db:
+                prev_cv = await cv_svc.get_previous_cv_for_user(db, UUID(user_id), UUID(cv_id))
+            if prev_cv and prev_cv.data:
+                cv_json = _merge_prev_profile(cv_json, prev_cv.data)
+
+            async with AsyncSessionLocal() as db:
+                await cv_svc.update_cv(
+                    db, UUID(cv_id),
+                    raw_text=accumulated.get("cv_text", ""),
+                    data=cv_json,
+                )
+            logger.info("[init_profile] completed — cv_id=%s name=%s", cv_id, cv_json.get("full_name"))
+
+        except Exception as exc:
+            await prog.publish_done(cv_id)
+            logger.error("[init_profile] failed — cv_id=%s | %s", cv_id, exc, exc_info=True)
+
+    _dispose_engines()
+    asyncio.run(_run())
+    return {"cv_id": cv_id}
+
+
+# ─── Task: run_search ─────────────────────────────────────────────────────────
+# Runs the full job-search pipeline using profile data (cv.data + user.preferences).
+# No PDF needed. Called on demand from the profile page.
+
+@celery_app.task(
+    name="app.worker.tasks.run_search",
+    bind=True,
+    max_retries=0,
+    time_limit=600,
+    soft_time_limit=540,
+)
+def run_search(self, analysis_id: str, cv_id: str, user_id: str) -> dict:
+    """Run job search pipeline from profile data. Progress events keyed on analysis_id."""
+    import app.users.models    # noqa: F401
+    import app.cv.models       # noqa: F401
+    import app.analysis.models # noqa: F401
+
+    from app.analysis import progress as prog
+    from app.analysis import service as analysis_svc
+    from app.cv import service as cv_svc
+    from app.db.session import AsyncSessionLocal
+    from app.pipeline.graph import search_pipeline
+    from app.users import service as user_svc
+
+    logger.info("[run_search] started — analysis_id=%s", analysis_id)
+
+    async def _run() -> None:
+        # Load profile data from DB
+        async with AsyncSessionLocal() as db:
+            cv   = await cv_svc.get_cv(db, UUID(cv_id))
+            user = await user_svc.get_user_by_id(db, UUID(user_id))
+
+        cv_json = (cv.data or {}) if cv else {}
+        prefs   = (user.preferences or {}) if user else {}
+
+        contracts  = prefs.get("contract_types") or []
+        work_modes = prefs.get("work_modes") or []
+
+        state = {
+            "cv_json":          cv_json,
+            "user_keywords":    [],
+            "keywords":         [],
+            "user_locations":   prefs.get("locations") or [],
+            "contract_type":    contracts[0] if contracts else "",
+            "remote":           "remote" in work_modes,
+            "date_posted":      "",
+            "experience_level": "",
+            "failed_keywords":  [],
+            "search_attempts":  0,
+            "jobs":             [],
+            "filtered_jobs":    [],
+            "matches":          [],
+            "final_report":     "",
+            "messages":         [],
+            "pdf_path":         "",
+            "cv_text":          "",
+        }
+
+        try:
+            accumulated: dict = dict(state)
+            async for chunk in search_pipeline.astream(state, stream_mode="updates"):
+                node_name = next(iter(chunk))
+                node_output = chunk[node_name]
+                if node_output is not None:
+                    await prog.publish(analysis_id, node_name)
+                    accumulated.update(node_output)
+
+            await prog.publish_done(analysis_id)
+
+            keywords_used: list[str] = accumulated.get("keywords") or []
+            if keywords_used:
+                from app.cortex.registry import register_keywords
+                await register_keywords(keywords_used)
+
+            async with AsyncSessionLocal() as db:
+                await analysis_svc.update_analysis(
+                    db, UUID(analysis_id),
+                    status="completed",
+                    keywords=accumulated.get("keywords", []),
+                    matches=accumulated.get("matches", []),
+                    final_report=accumulated.get("final_report", ""),
+                )
+
+            logger.info(
+                "[run_search] completed — analysis_id=%s matches=%d",
+                analysis_id, len(accumulated.get("matches", [])),
+            )
+            await prog.clear(analysis_id)
+
+        except Exception as exc:
+            await prog.publish_done(analysis_id)
+            logger.error("[run_search] failed — analysis_id=%s | %s", analysis_id, exc, exc_info=True)
+            async with AsyncSessionLocal() as db:
+                await analysis_svc.update_analysis(db, UUID(analysis_id), status="failed", error=str(exc))
+
+    _dispose_engines()
+    asyncio.run(_run())
+    return {"analysis_id": analysis_id}
+
+
+# ─── Task: run_pipeline (deprecated — kept for backwards compat) ──────────────
+
 @celery_app.task(
     name="app.worker.tasks.run_pipeline",
     bind=True,
-    max_retries=0,   # pipeline failures are logged + stored, not blindly retried
-    time_limit=600,  # 10 min hard limit
+    max_retries=0,
+    time_limit=600,
     soft_time_limit=540,
 )
 def run_pipeline(
@@ -39,6 +222,7 @@ def run_pipeline(
     analysis_id: str,
     pdf_path: str,
     cv_id: str,
+    user_id: str,
     user_keywords: list[str],
     user_locations: list[str],
     contract_type: str,
@@ -107,11 +291,34 @@ def run_pipeline(
                 from app.cortex.registry import register_keywords
                 await register_keywords(keywords_used)
 
+            # Merge user-curated profile fields from the previous CV so edits
+            # made in the profile page survive a new PDF upload.
+            # Rules:
+            #   - roles      → preserve previous (user-curated job titles)
+            #   - skills     → union of previous + new AI-extracted skills
+            #   - hobbies    → preserve previous if new PDF didn't extract any
+            #   - everything else (experiences, education, contact info, level)
+            #     → take fresh from new AI extraction (correct for a new PDF)
+            cv_json: dict = result.get("cv_json") or {}
+            async with AsyncSessionLocal() as db:
+                prev_cv = await cv_svc.get_previous_cv_for_user(
+                    db, UUID(user_id), UUID(cv_id)
+                )
+            if prev_cv and prev_cv.data:
+                prev = prev_cv.data
+                if prev.get("roles"):
+                    cv_json["roles"] = prev["roles"]
+                prev_skills = set(prev.get("skills") or [])
+                new_skills  = set(cv_json.get("skills") or [])
+                cv_json["skills"] = list(new_skills | prev_skills)
+                if prev.get("hobbies") and not cv_json.get("hobbies"):
+                    cv_json["hobbies"] = prev["hobbies"]
+
             async with AsyncSessionLocal() as db:
                 await cv_svc.update_cv(
                     db, UUID(cv_id),
                     raw_text=result.get("cv_text", ""),
-                    data=result.get("cv_json"),
+                    data=cv_json,
                 )
                 await analysis_svc.update_analysis(
                     db, UUID(analysis_id),
@@ -246,16 +453,33 @@ def refresh_user_analyses(self) -> dict:
                 if not cv or not cv.data:
                     continue
 
-                cv_json        = cv.data
+                # Load user preferences — used instead of stored search_filters when set
+                from app.users import service as user_svc
+                async with AsyncSessionLocal() as db:
+                    user = await user_svc.get_user_by_id(db, analysis.user_id)
+
+                user_prefs     = (user.preferences or {}) if user else {}
                 search_filters = analysis.search_filters or {}
+
+                pref_locations    = user_prefs.get("locations", [])
+                pref_contracts    = user_prefs.get("contract_types", [])
+                pref_work_modes   = user_prefs.get("work_modes", [])
+
+                # Profile preferences override stored search_filters when set
+                resolved_locations    = pref_locations  if pref_locations  else search_filters.get("locations", [])
+                resolved_contract     = pref_contracts[0] if pref_contracts else search_filters.get("contract_type", "")
+                resolved_remote       = ("remote" in pref_work_modes) if pref_work_modes else search_filters.get("remote", False)
+                resolved_exp_level    = search_filters.get("experience_level", "")
+
+                cv_json = cv.data
 
                 state = {
                     "cv_json":          cv_json,
                     "user_keywords":    search_filters.get("user_keywords", []),
-                    "user_locations":   search_filters.get("locations", []),
-                    "contract_type":    search_filters.get("contract_type", ""),
-                    "remote":           search_filters.get("remote", False),
-                    "experience_level": search_filters.get("experience_level", ""),
+                    "user_locations":   resolved_locations,
+                    "contract_type":    resolved_contract,
+                    "remote":           resolved_remote,
+                    "experience_level": resolved_exp_level,
                     "keywords":         analysis.keywords or [],
                     "jobs":             [],
                     "filtered_jobs":    [],

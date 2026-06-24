@@ -113,6 +113,31 @@ def get_presigned_url(key: str, expires_in: int = 3600) -> str | None:
     return url
 
 
+async def save_avatar(data: bytes, user_id: str, content_type: str, ext: str) -> str:
+    """
+    Persist a user avatar image. Overwrites any previous avatar for the same user.
+    Key format: avatars/{user_id}.{ext}
+    """
+    key = f"avatars/{user_id}.{ext}"
+
+    if s3_enabled():
+        _client().put_object(
+            Bucket=settings.S3_BUCKET,
+            Key=key,
+            Body=data,
+            ContentType=content_type,
+            CacheControl="no-cache",
+        )
+        logger.info("[storage] S3 avatar upload — key=%s (%d bytes)", key, len(data))
+    else:
+        local_path = Path(settings.UPLOAD_DIR) / key
+        local_path.parent.mkdir(parents=True, exist_ok=True)
+        local_path.write_bytes(data)
+        logger.info("[storage] Local avatar save — path=%s (%d bytes)", local_path, len(data))
+
+    return key
+
+
 async def delete_file(key: str) -> None:
     """Delete a file. Silently ignores missing files."""
     if s3_enabled():

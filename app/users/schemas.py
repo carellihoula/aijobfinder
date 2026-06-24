@@ -11,5 +11,6 @@ class UserResponse(BaseModel):
     is_active: bool
     is_admin: bool
     created_at: datetime
+    avatar_key: str | None = None
 
     model_config = {"from_attributes": True}

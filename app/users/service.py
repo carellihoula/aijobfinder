@@ -37,3 +37,23 @@ async def set_admin_status(db: AsyncSession, user_id: UUID, is_admin: bool) -> U
         await db.commit()
         await db.refresh(user)
     return user
+
+
+async def update_avatar_key(db: AsyncSession, user_id: UUID, avatar_key: str | None) -> User | None:
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user:
+        user.avatar_key = avatar_key
+        await db.commit()
+        await db.refresh(user)
+    return user
+
+
+async def update_user_preferences(db: AsyncSession, user_id: UUID, preferences: dict) -> User | None:
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user:
+        user.preferences = preferences
+        await db.commit()
+        await db.refresh(user)
+    return user

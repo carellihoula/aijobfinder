@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, String
+from sqlalchemy import JSON, Boolean, Column, DateTime, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -18,5 +18,7 @@ class User(Base):
     is_active = Column(Boolean, default=True)
     is_admin  = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    preferences = Column(JSON, nullable=True)
+    avatar_key  = Column(String, nullable=True)
 
     analyses = relationship("Analysis", back_populates="user", cascade="all, delete-orphan")

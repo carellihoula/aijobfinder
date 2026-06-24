@@ -23,23 +23,22 @@ from app.users.models import User
 router = APIRouter(prefix="/analysis", tags=["Analysis"])
 logger = get_logger(__name__)
 
-_VALID_CONTRACT_TYPES = {"cdi", "cdd", "stage", "alternance", "freelance", "temps_partiel", ""}
-_VALID_DATE_POSTED    = {"today", "3days", "week", "month", ""}
-_VALID_EXPERIENCE     = {"junior", "mid", "senior", ""}
+_PIPELINE_COOLDOWN = 86_400  # 24 h in seconds
 
 
-@router.post("/upload", response_model=AnalysisResponse, status_code=202)
+# ─── Upload — profile init (one-time) ────────────────────────────────────────
+
+@router.post("/upload", status_code=202)
 async def upload_cv(
     file: UploadFile = File(...),
-    keywords: str = Form(default=""),
-    locations: str = Form(default=""),
-    contract_type: str = Form(default=""),
-    remote: bool = Form(default=False),
-    date_posted: str = Form(default=""),
-    experience_level: str = Form(default=""),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
+    """
+    Upload a PDF CV to initialise the user's profile.
+    Runs only pdf_parser + cv_structurer — no job search.
+    Progress is published on the cv_id key (SSE: GET /analysis/init-stream/{cv_id}).
+    """
     if not file.filename or not file.filename.endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted")
 
@@ -47,98 +46,107 @@ async def upload_cv(
     if len(content) > settings.MAX_FILE_SIZE_MB * 1024 * 1024:
         raise HTTPException(status_code=413, detail=f"File exceeds {settings.MAX_FILE_SIZE_MB} MB limit")
 
-    if contract_type not in _VALID_CONTRACT_TYPES:
-        raise HTTPException(status_code=422, detail=f"contract_type must be one of: {', '.join(_VALID_CONTRACT_TYPES - {''})}")
-    if date_posted not in _VALID_DATE_POSTED:
-        raise HTTPException(status_code=422, detail=f"date_posted must be one of: {', '.join(_VALID_DATE_POSTED - {''})}")
-    if experience_level not in _VALID_EXPERIENCE:
-        raise HTTPException(status_code=422, detail=f"experience_level must be one of: {', '.join(_VALID_EXPERIENCE - {''})}")
-
-    user_keywords  = [kw.strip()  for kw  in keywords.split(",")  if kw.strip()][:10]
-    user_locations = [loc.strip() for loc in locations.split(",") if loc.strip()][:5]
-
-    # C — Dedup: same CV already analysed → always return cache.
-    # New Cortex jobs may be irrelevant to this profile; the nightly
-    # refresh_user_analyses does the proper hash comparison and updates
-    # the cache only when relevant jobs actually changed.
+    # Dedup: same PDF already extracted → return existing cv_id, skip re-extraction
     pdf_hash = hashlib.sha256(content).hexdigest()
     existing_cv = await cv_svc.get_cv_by_hash(db, current_user.id, pdf_hash)
-    if existing_cv:
-        existing_analysis = await analysis_svc.get_latest_completed_analysis_for_cv(db, existing_cv.id)
-        if existing_analysis:
-            logger.info("[analysis] Same CV — returning cached analysis %s", existing_analysis.id)
-            return existing_analysis
+    if existing_cv and existing_cv.data:
+        logger.info("[upload] Same CV hash — returning existing cv_id=%s", existing_cv.id)
+        return {"cv_id": str(existing_cv.id), "status": "ready"}
 
-    # Rate limit — 3 cases:
-    #   1. No previous analysis → first profile config → always allowed
-    #   2. Previous analysis processing → pipeline already running → 409
-    #   3. Previous analysis completed < 24h ago → 429 with time remaining
-    #   4. Previous analysis failed → allow retry (bad UX to block on errors)
-    _PIPELINE_COOLDOWN = 86_400  # 24 hours in seconds
+    cv_id       = uuid_lib.uuid4()
+    storage_key = await save_cv(content, str(current_user.id), str(cv_id), file.filename)
+    await cv_svc.create_cv(db, cv_id=cv_id, user_id=current_user.id, pdf_path=storage_key, pdf_hash=pdf_hash)
+
+    from app.worker.tasks import init_profile
+    init_profile.delay(cv_id=str(cv_id), user_id=str(current_user.id), pdf_path=storage_key)
+
+    logger.info("[upload] cv_id=%s user=%s — init_profile enqueued", cv_id, current_user.id)
+    return {"cv_id": str(cv_id), "status": "processing"}
+
+
+# ─── Init stream (SSE for profile extraction progress) ────────────────────────
+
+@router.get("/init-stream/{cv_id}")
+async def init_stream(
+    cv_id: str,
+    current_user: User = Depends(get_current_user),
+):
+    """SSE — streams pdf_parser + cv_structurer progress to the browser."""
+    async def generate():
+        async for event in prog.subscribe(cv_id):
+            yield f"data: {json.dumps(event)}\n\n"
+        if not await prog.has_history(cv_id):
+            yield f"data: {json.dumps({'done': True})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
+    )
+
+
+# ─── Launch search — uses profile data (on-demand) ────────────────────────────
+
+@router.post("/search", response_model=AnalysisResponse, status_code=202)
+async def launch_search(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Launch a job-search run using the user's profile (cv.data + user.preferences).
+    No PDF required. Rate-limited to once per 24 h.
+    Progress available via SSE: GET /analysis/{id}/stream.
+    """
+    cv = await cv_svc.get_latest_cv_for_user(db, current_user.id)
+    if not cv or not cv.data:
+        raise HTTPException(
+            status_code=400,
+            detail="No profile found. Upload your CV first to initialise your profile.",
+        )
+
+    # Rate limit: one search per 24 h
     latest = await analysis_svc.get_latest_analysis_for_user(db, current_user.id)
     if latest:
         if latest.status == "processing":
             raise HTTPException(
                 status_code=409,
-                detail="An analysis is already running. Wait for it to complete before launching a new one.",
+                detail="A search is already running. Wait for it to complete.",
             )
         if latest.status == "completed":
             created = latest.created_at
             if created.tzinfo is None:
                 created = created.replace(tzinfo=timezone.utc)
-            age_seconds = (datetime.now(timezone.utc) - created).total_seconds()
-            if age_seconds < _PIPELINE_COOLDOWN:
-                wait_hours = round((_PIPELINE_COOLDOWN - age_seconds) / 3600, 1)
+            age = (datetime.now(timezone.utc) - created).total_seconds()
+            if age < _PIPELINE_COOLDOWN:
+                wait_h = round((_PIPELINE_COOLDOWN - age) / 3600, 1)
                 raise HTTPException(
                     status_code=429,
-                    detail=f"Rate limit: your next analysis will be available in {wait_hours}h. "
+                    detail=f"Rate limit: next search available in {wait_h}h. "
                            "Your results are refreshed automatically every night.",
                 )
 
-    search_filters = {
-        "locations":        user_locations,
-        "contract_type":    contract_type,
-        "remote":           remote,
-        "date_posted":      date_posted,
-        "experience_level": experience_level,
-    }
-
-    logger.info(
-        "[analysis] Upload received — file=%s, user=%s, keywords=%s, filters=%s",
-        file.filename, current_user.id, user_keywords, search_filters,
-    )
-
-    cv_id       = uuid_lib.uuid4()
-    storage_key = await save_cv(content, str(current_user.id), str(cv_id), file.filename)
-
-    cv       = await cv_svc.create_cv(db, cv_id=cv_id, user_id=current_user.id, pdf_path=storage_key, pdf_hash=pdf_hash)
     analysis = await analysis_svc.create_analysis(db, user_id=current_user.id, cv_id=cv.id)
-    await analysis_svc.update_analysis(db, analysis.id, status="processing", search_filters=search_filters)
+    await analysis_svc.update_analysis(db, analysis.id, status="processing")
 
-    # Enqueue the pipeline in Celery — runs in a separate worker process
-    from app.worker.tasks import run_pipeline
-    run_pipeline.delay(
+    from app.worker.tasks import run_search
+    run_search.delay(
         analysis_id=str(analysis.id),
-        pdf_path=storage_key,
         cv_id=str(cv.id),
-        user_keywords=user_keywords,
-        user_locations=user_locations,
-        contract_type=contract_type,
-        remote=remote,
-        date_posted=date_posted,
-        experience_level=experience_level,
+        user_id=str(current_user.id),
     )
 
+    logger.info("[search] analysis_id=%s user=%s — run_search enqueued", analysis.id, current_user.id)
     await db.refresh(analysis)
     return analysis
 
+
+# ─── Read endpoints ───────────────────────────────────────────────────────────
 
 @router.get("/latest", response_model=AnalysisResponse)
 async def get_latest_analysis(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Return the most recent analysis for the current user."""
     analysis = await analysis_svc.get_latest_analysis_for_user(db, current_user.id)
     if not analysis:
         raise HTTPException(status_code=404, detail="No analysis found")
@@ -150,7 +158,6 @@ async def get_cv_data(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Return the structured CV JSON from the user's latest CV upload."""
     cv = await cv_svc.get_latest_cv_for_user(db, current_user.id)
     if not cv or not cv.data:
         raise HTTPException(status_code=404, detail="No CV data found")
@@ -163,7 +170,6 @@ async def update_cv_data(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Partially update the structured CV JSON for the user's latest CV."""
     cv = await cv_svc.get_latest_cv_for_user(db, current_user.id)
     if not cv:
         raise HTTPException(status_code=404, detail="No CV found")
@@ -190,7 +196,7 @@ async def stream_analysis(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """SSE endpoint — streams pipeline node progress to the browser in real time."""
+    """SSE — streams search pipeline node progress to the browser."""
     analysis = await analysis_svc.get_analysis(db, analysis_id, current_user.id)
     if not analysis:
         raise HTTPException(status_code=404, detail="Analysis not found")
@@ -200,77 +206,48 @@ async def stream_analysis(
     async def generate():
         async for event in prog.subscribe(aid):
             yield f"data: {json.dumps(event)}\n\n"
-        # If pipeline was already cleared (very old analysis), send done immediately
         if not await prog.has_history(aid):
             yield f"data: {json.dumps({'done': True})}\n\n"
 
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control":    "no-cache",
-            "X-Accel-Buffering": "no",
-            "Connection":       "keep-alive",
-        },
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Connection": "keep-alive"},
     )
 
 
-# ── Admin endpoints ────────────────────────────────────────────────────────────
+# ─── Admin endpoints ──────────────────────────────────────────────────────────
 
 class AdminForceRequest(BaseModel):
     user_id: UUID
-    keywords: list[str] = []
-    locations: list[str] = []
-    contract_type: str = ""
-    remote: bool = False
-    date_posted: str = ""
-    experience_level: str = ""
 
 
 @router.post("/admin/force", response_model=AnalysisResponse, status_code=202)
-async def admin_force_pipeline(
+async def admin_force_search(
     body: AdminForceRequest,
     admin: User = Depends(get_admin_user),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Admin only — force a fresh pipeline for any user.
-    Bypasses rate limit, dedup, and the 24h cooldown.
-    Uses the user's latest CV already stored in the system.
+    Admin only — force a fresh search for any user using their current profile.
+    Bypasses rate limit and cooldown.
     """
     cv = await cv_svc.get_latest_cv_for_user(db, body.user_id)
-    if not cv or not cv.pdf_path:
-        raise HTTPException(status_code=404, detail="No CV found for this user. They must upload one first.")
-
-    user_keywords  = body.keywords[:10]
-    user_locations = body.locations[:5]
-
-    search_filters = {
-        "locations":        user_locations,
-        "contract_type":    body.contract_type,
-        "remote":           body.remote,
-        "date_posted":      body.date_posted,
-        "experience_level": body.experience_level,
-    }
+    if not cv or not cv.data:
+        raise HTTPException(status_code=404, detail="No profile found for this user.")
 
     analysis = await analysis_svc.create_analysis(db, user_id=body.user_id, cv_id=cv.id)
-    await analysis_svc.update_analysis(db, analysis.id, status="processing", search_filters=search_filters)
+    await analysis_svc.update_analysis(db, analysis.id, status="processing")
 
-    from app.worker.tasks import run_pipeline
-    run_pipeline.delay(
+    from app.worker.tasks import run_search
+    run_search.delay(
         analysis_id=str(analysis.id),
-        pdf_path=cv.pdf_path,
         cv_id=str(cv.id),
-        user_keywords=user_keywords,
-        user_locations=user_locations,
-        contract_type=body.contract_type,
-        remote=body.remote,
-        date_posted=body.date_posted,
-        experience_level=body.experience_level,
+        user_id=str(body.user_id),
     )
 
     logger.info(
-        "[admin] Pipeline forced for user=%s analysis=%s by admin=%s",
+        "[admin] Search forced for user=%s analysis=%s by admin=%s",
         body.user_id, analysis.id, admin.id,
     )
     await db.refresh(analysis)

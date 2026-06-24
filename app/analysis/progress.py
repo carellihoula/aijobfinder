@@ -22,6 +22,7 @@ _HISTORY_TTL = 3600  # 1 hour
 NODE_LABELS: dict[str, str] = {
     "pdf_parser":        "Lecture du CV",
     "cv_structurer":     "Analyse du profil",
+    "cortex_search":     "Recherche Cortex",
     "keyword_extractor": "Extraction des mots-clés",
     "job_search":        "Recherche d'offres",
     "cortex_feed":       "Mise à jour Cortex",
