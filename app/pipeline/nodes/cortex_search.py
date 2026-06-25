@@ -103,6 +103,7 @@ async def cortex_search_node(state: PipelineState) -> dict:
             "url":           j["url"],
             "contract_type": j["contract_type"],
             "remote":        j["remote"],
+            "date":          j["created_at"].isoformat() if j.get("created_at") else "",
         }
         for j in jobs
     ]

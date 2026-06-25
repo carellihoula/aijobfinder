@@ -1,7 +1,6 @@
 from uuid import UUID
 
-from fastapi import Depends, HTTPException
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import Cookie, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.utils import decode_token
@@ -9,14 +8,14 @@ from app.config import settings
 from app.db.session import get_db
 from app.users.service import get_user_by_id
 
-bearer_scheme = HTTPBearer()
-
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    token: str | None = Cookie(default=None),
     db: AsyncSession = Depends(get_db),
 ):
-    payload = decode_token(credentials.credentials)
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    payload = decode_token(token)
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 

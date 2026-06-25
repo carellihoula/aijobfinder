@@ -88,7 +88,7 @@ async def search_jobs(
     where_clause = " AND ".join(conditions)
     stmt = text(f"""
         SELECT id, title, company, location, description, url,
-               contract_type, remote, seniority, skills
+               contract_type, remote, seniority, skills, created_at
         FROM cortex_jobs
         WHERE {where_clause}
         ORDER BY embedding <=> CAST(:embedding AS vector)
