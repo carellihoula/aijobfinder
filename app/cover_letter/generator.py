@@ -107,7 +107,7 @@ dynamic for tech/startups, creative for design/media
   • cultural_fit  — (optional) alignment with company values, mission or culture if clearly known
   • call_to_action — strong closing: reinforce fit, request interview, show availability
 - Each paragraph: 4–5 sentences, 80–110 words. Be specific, avoid clichés, no filler.
-- closing: 1 short impactful sentence (e.g. "Je serais ravi(e) de vous présenter ma candidature lors d'un entretien.")
+- closing: 1 short impactful sentence. Use "{ravi_form}" (the candidate's gender-appropriate form). Never write "ravi(e)". Example: "Je serais {ravi_form} de vous présenter ma candidature lors d'un entretien."
 - city_date format: "Ville, J mois YYYY" — use EXACTLY today's date: {today}
 - If candidate location has multiple parts, use the first city only
 - Extract sender info from the candidate profile (use empty string if missing)
@@ -126,6 +126,7 @@ Rules:
 - Apply the refinement instructions precisely and only where requested
 - If no explicit instruction targets a specific paragraph, keep it as-is (same wording)
 - ALL text fields must be written in French
+- closing: use "{ravi_form}" (never "ravi(e)")
 - city_date format: "Ville, J mois YYYY" — use EXACTLY today's date: {today}
 - highlighted_skills, tone and key_selling_point should only change if the instructions imply it
 """
@@ -136,12 +137,15 @@ async def generate_cover_letter(
     job: dict,
     suggestion: str = "",
     previous_content: dict | None = None,
+    gender: str = "",
 ) -> CoverLetterContent:
     """
     Generates or refines a cover letter.
     When previous_content is provided the LLM refines the existing letter instead of
     generating from scratch — only the parts targeted by suggestion are changed.
     """
+    ravi_form = "ravie" if gender == "female" else "ravi"
+
     llm = ChatOpenAI(
         model=settings.OPENAI_MODEL,
         temperature=0.4,
@@ -149,7 +153,7 @@ async def generate_cover_letter(
     ).with_structured_output(CoverLetterContent)
 
     if previous_content:
-        system = _REFINE_SYSTEM_PROMPT.format(today=_today_fr())
+        system = _REFINE_SYSTEM_PROMPT.format(today=_today_fr(), ravi_form=ravi_form)
         human = (
             f"## Candidate profile\n{_format_cv(cv)}\n\n"
             f"## Job offer\n{_format_job(job)}\n\n"
@@ -157,7 +161,7 @@ async def generate_cover_letter(
             f"## Refinement instructions\n{suggestion.strip() or 'Améliore globalement la lettre sans changer sa structure.'}"
         )
     else:
-        system = _SYSTEM_PROMPT.format(today=_today_fr())
+        system = _SYSTEM_PROMPT.format(today=_today_fr(), ravi_form=ravi_form)
         human = f"## Candidate profile\n{_format_cv(cv)}\n\n## Job offer\n{_format_job(job)}"
         if suggestion.strip():
             human += f"\n\n## Modification request\n{suggestion.strip()}"

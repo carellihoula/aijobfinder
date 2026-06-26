@@ -83,10 +83,12 @@ async def create_cover_letter(
         db, analysis_id, current_user.id, job_index
     )
 
+    gender = (current_user.preferences or {}).get("gender", "") if current_user.preferences else ""
     content: CoverLetterContent = await generate_cover_letter(
         cv_data, job,
         suggestion=body.suggestion,
         previous_content=body.previous_content,
+        gender=gender,
     )
     pdf_bytes = render_pdf(content)
 
@@ -131,7 +133,8 @@ async def apply_to_job(
     cv = await get_cv(db, analysis.cv_id) if analysis.cv_id else None
     has_cv_file = bool(cv and cv.pdf_path)
 
-    content: CoverLetterContent = await generate_cover_letter(cv_data, job)
+    gender = (current_user.preferences or {}).get("gender", "") if current_user.preferences else ""
+    content: CoverLetterContent = await generate_cover_letter(cv_data, job, gender=gender)
 
     logger.info(
         "[apply] user=%s analysis=%s job_index=%d job=%r tone=%s",
