@@ -17,26 +17,33 @@ celery_app.conf.update(
     timezone="Europe/Paris",
     enable_utc=True,
     task_track_started=True,
-    task_acks_late=True,           # acknowledge only after task completes (safer)
-    worker_prefetch_multiplier=1,  # one task at a time per worker (ingestion is heavy)
+    task_acks_late=True,
+    worker_prefetch_multiplier=1,
 )
 
 # ── Scheduled tasks (Celery Beat) ─────────────────────────────────────────────
 celery_app.conf.beat_schedule = {
-    # Nightly cron — re-fetches Adzuna for all keywords accumulated from user pipelines.
-    # Uses date_posted=3 (last 3 days) to stay efficient. Skips if registry is empty.
-    "cortex-full-ingestion-nightly": {
-        "task": "app.worker.tasks.full_ingestion",
-        "schedule": crontab(hour=2, minute=0),
-        "kwargs": {"locations": None},
+    # France Travail — every 3 hours (new offers posted continuously throughout the day)
+    "ingest-france-travail": {
+        "task": "app.worker.tasks.ingest_france_travail",
+        "schedule": crontab(minute=0, hour="*/3"),
     },
-    # Per-user nightly refresh — runs after ingestion (2h), checks each stale analysis.
-    # Calls LLM only when the Cortex has new jobs not yet seen by this user.
+    # Greenhouse — once daily at 01:15 (ATS boards update infrequently)
+    "ingest-greenhouse": {
+        "task": "app.worker.tasks.ingest_greenhouse",
+        "schedule": crontab(minute=15, hour=1),
+    },
+    # Lever — once daily at 01:30, offset to avoid overlap with Greenhouse
+    "ingest-lever": {
+        "task": "app.worker.tasks.ingest_lever",
+        "schedule": crontab(minute=30, hour=1),
+    },
+    # Per-user nightly refresh — at 03:45, after the 03:00 France Travail ingestion finishes
     "refresh-user-analyses-nightly": {
         "task": "app.worker.tasks.refresh_user_analyses",
-        "schedule": crontab(hour=3, minute=0),
+        "schedule": crontab(hour=3, minute=45),
     },
-    # Cleanup old jobs every Sunday at 4am — deactivate jobs not seen in 30 days
+    # Cleanup old jobs every Sunday at 04:00
     "cortex-cleanup-weekly": {
         "task": "app.worker.tasks.cleanup_old_jobs",
         "schedule": crontab(hour=4, minute=0, day_of_week=0),

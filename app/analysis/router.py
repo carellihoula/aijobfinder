@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analysis import progress as prog
 from app.analysis import service as analysis_svc
+from app.analysis.service import deactivate_user_analyses
 from app.analysis.schemas import AnalysisResponse
 from app.auth.dependencies import get_admin_user, get_current_user
 from app.config import settings
@@ -125,6 +126,7 @@ async def launch_search(
                            "Your results are refreshed automatically every night.",
                 )
 
+    await deactivate_user_analyses(db, current_user.id)
     analysis = await analysis_svc.create_analysis(db, user_id=current_user.id, cv_id=cv.id)
     await analysis_svc.update_analysis(db, analysis.id, status="processing")
 

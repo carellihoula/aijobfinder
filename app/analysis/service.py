@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analysis.models import Analysis
@@ -30,7 +30,17 @@ async def get_user_analyses(db: AsyncSession, user_id: UUID) -> list[Analysis]:
 
 
 async def get_latest_analysis_for_user(db: AsyncSession, user_id: UUID) -> Analysis | None:
-    """Return the most recent analysis for this user (any status)."""
+    """Return the active analysis for this user, or the most recent if none is active."""
+    result = await db.execute(
+        select(Analysis)
+        .where(Analysis.user_id == user_id, Analysis.is_active == True)
+        .order_by(Analysis.created_at.desc())
+        .limit(1)
+    )
+    active = result.scalar_one_or_none()
+    if active:
+        return active
+    # Fallback for existing rows that predate the is_active column
     result = await db.execute(
         select(Analysis)
         .where(Analysis.user_id == user_id)
@@ -40,11 +50,22 @@ async def get_latest_analysis_for_user(db: AsyncSession, user_id: UUID) -> Analy
     return result.scalar_one_or_none()
 
 
+async def deactivate_user_analyses(db: AsyncSession, user_id: UUID) -> None:
+    """Mark all existing analyses for this user as inactive before creating a new one."""
+    await db.execute(
+        update(Analysis)
+        .where(Analysis.user_id == user_id)
+        .values(is_active=False)
+    )
+    await db.commit()
+
+
 async def get_stale_analyses(db: AsyncSession, cortex_updated_at: datetime) -> list[Analysis]:
-    """Return completed analyses whose cortex snapshot is older than cortex_updated_at."""
+    """Return active completed analyses whose cortex snapshot is older than cortex_updated_at."""
     result = await db.execute(
         select(Analysis).where(
             Analysis.status == "completed",
+            Analysis.is_active == True,
             Analysis.cv_id.isnot(None),
             or_(
                 Analysis.cortex_snapshot_at.is_(None),

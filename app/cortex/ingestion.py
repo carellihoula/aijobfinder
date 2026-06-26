@@ -1,231 +1,157 @@
 import asyncio
 
-import httpx
 from langchain_openai import OpenAIEmbeddings
 
 from app.config import settings
 from app.cortex import service as cortex_svc
 from app.cortex.db import CortexSessionLocal
 from app.cortex.enricher import enrich_seniority
+from app.cortex.providers.base import JobProvider, RawJob
 from app.logger import get_logger
-from app.pipeline.nodes.job_search import _search_adzuna
 
 logger = get_logger(__name__)
 
 
-async def run_ingestion_from_registry(locations: list[str] | None = None) -> dict:
+def _make_hash(job: RawJob) -> str:
+    return cortex_svc.make_job_hash(job.title, job.company, job.location)
+
+
+async def run_provider_ingestion(provider: JobProvider) -> dict:
     """
-    Nightly cron ingestion — uses keywords accumulated from real user pipelines.
-    Fetches only offers from the last 3 days (date_posted="3") to stay efficient.
-    Returns early if the registry is empty (no users have run the pipeline yet).
-
-    Called by: Celery Beat nightly cron, POST /cortex/ingest/full admin endpoint.
-    """
-    from app.cortex.registry import get_all_keywords
-
-    keywords = await get_all_keywords()
-    if not keywords:
-        logger.info("[ingestion] Registry empty — no user keywords yet, skipping")
-        return {"fetched": 0, "new": 0, "stored": 0}
-
-    logger.info("[ingestion] Registry ingestion — %d keywords", len(keywords))
-    return await run_ingestion(keywords, locations, date_posted="month")
-
-
-async def run_seed_ingestion(keywords: list[str], locations: list[str] | None = None) -> dict:
-    """Manual admin bootstrap with explicit keywords (no date filter)."""
-    logger.info("[ingestion] Seed ingestion — %d keywords", len(keywords))
-    return await run_ingestion(keywords, locations, date_posted="")
-
-
-async def run_ingestion(keywords: list[str], locations: list[str] | None = None, date_posted: str = "") -> dict:
-    """
-    Ingestion pipeline:
-      1. Fetch raw jobs from Adzuna
-      2. Deduplicate in memory (hash: title+company+location)
-      3. Identify jobs already in Cortex → refresh last_seen only
-      4. Detect seniority via LLM batch (30 jobs/call, gpt-4o-mini)
-      5. Embed new jobs
+    Full ingestion pipeline for a single provider:
+      1. Fetch raw jobs
+      2. Deduplicate in memory (external_id + title/company/location hash)
+      3. Skip jobs already in Cortex (refresh last_seen only)
+      4. Enrich seniority via LLM
+      5. Embed
       6. Store in Cortex
 
-    date_posted: Adzuna filter — "" = all time, "1" = last 24h, "3" = last 3 days.
+    Called by individual Celery tasks (ingest_france_travail, ingest_greenhouse, ingest_lever).
     """
     if CortexSessionLocal is None:
         logger.error("[ingestion] CORTEX_DATABASE_URL not configured")
         return {"fetched": 0, "new": 0, "stored": 0}
 
-    if locations is None:
-        locations = [""]
-
-    if not (settings.ADZUNA_APP_ID and settings.ADZUNA_APP_KEY):
-        logger.warning("[ingestion] Adzuna not configured")
-        return {"fetched": 0, "new": 0, "stored": 0}
-
     # ── 1. Fetch ──────────────────────────────────────────────────────────────
-    logger.info(
-        "[ingestion] Fetching via Adzuna — keywords=%d, locations=%s",
-        len(keywords), locations,
-    )
-    combos = [(kw, loc) for kw in keywords for loc in locations]
-    raw_results = []
-    async with httpx.AsyncClient(timeout=30) as client:
-        for i, (kw, loc) in enumerate(combos):
-            try:
-                result = await _search_adzuna(client, kw, loc, "", False, date_posted, "")
-                raw_results.append(result)
-            except Exception as exc:
-                raw_results.append(exc)
-            if i < len(combos) - 1:
-                await asyncio.sleep(1.2)
+    logger.info("[ingestion:%s] Fetching jobs ...", provider.name)
+    raw_jobs: list[RawJob] = await provider.fetch_jobs()
+    logger.info("[ingestion:%s] Fetched %d raw jobs", provider.name, len(raw_jobs))
 
-    # ── 2. Deduplicate in memory ──────────────────────────────────────────────
-    seen: set[str] = set()
-    raw_jobs: list[dict] = []
-    for batch in raw_results:
-        if isinstance(batch, Exception):
-            logger.warning("[ingestion] Provider call failed: %s", batch)
-            continue
-        for job in batch:
-            h = cortex_svc.make_job_hash(
-                job.get("title", ""), job.get("company", ""), job.get("location", "")
-            )
-            if h not in seen:
-                seen.add(h)
-                job["job_hash"] = h
-                raw_jobs.append(job)
-
-    logger.info("[ingestion] %d unique raw jobs fetched", len(raw_jobs))
     if not raw_jobs:
         return {"fetched": 0, "new": 0, "stored": 0}
 
+    # ── 2. Deduplicate in memory ──────────────────────────────────────────────
+    seen_ids:    set[str] = set()
+    seen_hashes: set[str] = set()
+    unique: list[tuple[RawJob, str]] = []  # (job, hash)
+
+    for job in raw_jobs:
+        h = _make_hash(job)
+        ext_key = f"{provider.name}:{job.external_id}" if job.external_id else None
+
+        if (ext_key and ext_key in seen_ids) or h in seen_hashes:
+            continue
+
+        if ext_key:
+            seen_ids.add(ext_key)
+        seen_hashes.add(h)
+        unique.append((job, h))
+
+    logger.info("[ingestion:%s] %d unique jobs after in-memory dedup", provider.name, len(unique))
+
     # ── 3. Check DB ───────────────────────────────────────────────────────────
-    all_hashes = [j["job_hash"] for j in raw_jobs]
+    all_hashes = [h for _, h in unique]
     async with CortexSessionLocal() as db:
         existing = await cortex_svc.get_existing_hashes(db, all_hashes)
         await cortex_svc.refresh_seen(db, list(existing))
 
-    new_jobs = [j for j in raw_jobs if j["job_hash"] not in existing]
+    new_pairs = [(job, h) for job, h in unique if h not in existing]
     logger.info(
-        "[ingestion] %d new jobs to process (%d already in Cortex)",
-        len(new_jobs), len(existing),
+        "[ingestion:%s] %d new jobs (%d already in Cortex)",
+        provider.name, len(new_pairs), len(existing),
     )
-    if not new_jobs:
+    if not new_pairs:
         return {"fetched": len(raw_jobs), "new": 0, "stored": 0}
 
-    # ── 4. Enrich seniority via LLM ───────────────────────────────────────────
-    enriched = await enrich_seniority(new_jobs)
+    # ── 4. Enrich seniority ───────────────────────────────────────────────────
+    jobs_dict = [
+        {
+            "title":         job.title,
+            "company":       job.company,
+            "location":      job.location,
+            "desc":          job.description,
+            "url":           job.url,
+            "contract_type": job.contract_type,
+            "remote":        job.remote,
+            "source":        job.source,
+            "job_hash":      h,
+        }
+        for job, h in new_pairs
+    ]
+    enriched = await enrich_seniority(jobs_dict)
 
     # ── 5. Embed ──────────────────────────────────────────────────────────────
-    logger.info("[ingestion] Embedding %d jobs ...", len(enriched))
+    logger.info("[ingestion:%s] Embedding %d jobs ...", provider.name, len(enriched))
     embedder = OpenAIEmbeddings(
         model=settings.OPENAI_EMBEDDING_MODEL,
         api_key=settings.OPENAI_API_KEY,
     )
-    texts = [
-        f"{j.get('title', '')} {j.get('desc', '')}".strip()
-        for j in enriched
-    ]
+    texts = [f"{j['title']} {j['desc']}".strip() for j in enriched]
     embeddings = await embedder.aembed_documents(texts)
 
     # ── 6. Store ──────────────────────────────────────────────────────────────
     stored = 0
     async with CortexSessionLocal() as db:
-        for job, emb in zip(enriched, embeddings):
+        for job_d, emb in zip(enriched, embeddings):
             try:
                 await cortex_svc.upsert_job(db, {
-                    "job_hash":      job["job_hash"],
-                    "title":         job.get("title", ""),
-                    "company":       job.get("company", ""),
-                    "location":      job.get("location", ""),
-                    "description":   job.get("desc", ""),
-                    "url":           job.get("url", ""),
-                    "source":        job.get("source", ""),
-                    "contract_type": job.get("contract_type", ""),
-                    "remote":        job.get("remote", False),
-                    "seniority":     job.get("seniority", ""),
+                    "job_hash":      job_d["job_hash"],
+                    "title":         job_d["title"],
+                    "company":       job_d["company"],
+                    "location":      job_d["location"],
+                    "description":   job_d["desc"],
+                    "url":           job_d["url"],
+                    "source":        job_d["source"],
+                    "contract_type": job_d["contract_type"],
+                    "remote":        job_d["remote"],
+                    "seniority":     job_d.get("seniority", ""),
                     "embedding":     emb,
                 })
                 stored += 1
             except Exception as exc:
-                logger.warning("[ingestion] Failed to store '%s': %s", job.get("title"), exc)
+                logger.warning("[ingestion:%s] Failed to store '%s': %s", provider.name, job_d["title"], exc)
 
     logger.info(
-        "[ingestion] Done — fetched=%d, new=%d, stored=%d",
-        len(raw_jobs), len(new_jobs), stored,
+        "[ingestion:%s] Done — fetched=%d, unique=%d, new=%d, stored=%d",
+        provider.name, len(raw_jobs), len(unique), len(new_pairs), stored,
     )
     if stored > 0:
         from app.cortex.registry import set_cortex_updated_at
         await set_cortex_updated_at()
-    return {"fetched": len(raw_jobs), "new": len(new_jobs), "stored": stored}
+
+    return {"fetched": len(raw_jobs), "new": len(new_pairs), "stored": stored}
 
 
-async def store_jobs_from_fallback(jobs: list[dict]) -> dict:
-    """
-    Store jobs found by the API fallback directly into the Cortex.
-    Skips the fetch step — jobs are already in memory from job_search_node.
-    Pipeline: dedup → enrich seniority → embed → store.
-    """
-    if CortexSessionLocal is None or not jobs:
-        return {"new": 0, "stored": 0}
+async def run_all_providers() -> dict:
+    """Run all providers sequentially. Called by the nightly full_ingestion task."""
+    from app.cortex.providers.france_travail import FranceTravailProvider
+    from app.cortex.providers.greenhouse import GreenhouseProvider
+    from app.cortex.providers.lever import LeverProvider
 
-    # ── 1. Add job_hash ───────────────────────────────────────────────────────
-    seen: set[str] = set()
-    hashed_jobs: list[dict] = []
-    for job in jobs:
-        h = cortex_svc.make_job_hash(
-            job.get("title", ""), job.get("company", ""), job.get("location", "")
-        )
-        if h not in seen:
-            seen.add(h)
-            job["job_hash"] = h
-            hashed_jobs.append(job)
+    providers: list[JobProvider] = [
+        FranceTravailProvider(),
+        GreenhouseProvider(),
+        LeverProvider(),
+    ]
 
-    # ── 2. Filter out already known jobs ─────────────────────────────────────
-    all_hashes = [j["job_hash"] for j in hashed_jobs]
-    async with CortexSessionLocal() as db:
-        existing = await cortex_svc.get_existing_hashes(db, all_hashes)
-        await cortex_svc.refresh_seen(db, list(existing))
+    totals: dict = {"fetched": 0, "new": 0, "stored": 0}
+    for provider in providers:
+        try:
+            result = await run_provider_ingestion(provider)
+            for k in totals:
+                totals[k] += result.get(k, 0)
+        except Exception as exc:
+            logger.error("[ingestion] Provider %s crashed: %s", provider.name, exc, exc_info=True)
 
-    new_jobs = [j for j in hashed_jobs if j["job_hash"] not in existing]
-    logger.info(
-        "[cortex_feed] %d jobs from fallback — %d new, %d already in Cortex",
-        len(jobs), len(new_jobs), len(existing),
-    )
-    if not new_jobs:
-        return {"new": 0, "stored": 0}
-
-    # ── 3. Enrich seniority ───────────────────────────────────────────────────
-    enriched = await enrich_seniority(new_jobs)
-
-    # ── 4. Embed ──────────────────────────────────────────────────────────────
-    embedder = OpenAIEmbeddings(
-        model=settings.OPENAI_EMBEDDING_MODEL,
-        api_key=settings.OPENAI_API_KEY,
-    )
-    texts = [f"{j.get('title', '')} {j.get('desc', '')}".strip() for j in enriched]
-    embeddings = await embedder.aembed_documents(texts)
-
-    # ── 5. Store ──────────────────────────────────────────────────────────────
-    stored = 0
-    async with CortexSessionLocal() as db:
-        for job, emb in zip(enriched, embeddings):
-            try:
-                await cortex_svc.upsert_job(db, {
-                    "job_hash":      job["job_hash"],
-                    "title":         job.get("title", ""),
-                    "company":       job.get("company", ""),
-                    "location":      job.get("location", ""),
-                    "description":   job.get("desc", ""),
-                    "url":           job.get("url", ""),
-                    "source":        job.get("source", ""),
-                    "contract_type": job.get("contract_type", ""),
-                    "remote":        job.get("remote", False),
-                    "seniority":     job.get("seniority", ""),
-                    "embedding":     emb,
-                })
-                stored += 1
-            except Exception as exc:
-                logger.warning("[cortex_feed] Failed to store '%s': %s", job.get("title"), exc)
-
-    logger.info("[cortex_feed] Stored %d new jobs from fallback into Cortex", stored)
-    return {"new": len(new_jobs), "stored": stored}
+    logger.info("[ingestion] All providers done — %s", totals)
+    return totals

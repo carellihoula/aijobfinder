@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Column, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -22,6 +22,8 @@ class Analysis(Base):
     keywords = Column(JSON, nullable=True)
     matches = Column(JSON, nullable=True)
     final_report = Column(Text, nullable=True)
+
+    is_active            = Column(Boolean, default=True, nullable=False, index=True)
 
     created_at           = Column(DateTime(timezone=True), server_default=func.now())
     updated_at           = Column(DateTime(timezone=True), onupdate=func.now())

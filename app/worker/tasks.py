@@ -40,8 +40,6 @@ def _merge_prev_profile(cv_json: dict, prev_data: dict) -> dict:
 
 
 # ─── Task: init_profile ───────────────────────────────────────────────────────
-# Runs pdf_parser + cv_structurer only. Called on CV upload (one-time onboarding).
-# No job search — just populates cv.data from the PDF.
 
 @celery_app.task(
     name="app.worker.tasks.init_profile",
@@ -66,11 +64,9 @@ def init_profile(self, cv_id: str, user_id: str, pdf_path: str) -> dict:
     async def _run() -> None:
         state = {
             "pdf_path": pdf_path, "cv_text": "", "cv_json": None,
-            "user_keywords": [], "keywords": [], "user_locations": [],
-            "contract_type": "", "remote": False, "date_posted": "",
-            "experience_level": "", "failed_keywords": [], "search_attempts": 0,
-            "jobs": [], "filtered_jobs": [], "matches": [], "final_report": "",
-            "messages": [],
+            "user_locations": [], "contract_type": "", "remote": False,
+            "experience_level": "", "jobs": [], "filtered_jobs": [],
+            "matches": [], "final_report": "", "messages": [],
         }
         try:
             accumulated: dict = dict(state)
@@ -82,10 +78,8 @@ def init_profile(self, cv_id: str, user_id: str, pdf_path: str) -> dict:
                     accumulated.update(node_output)
 
             await prog.publish_done(cv_id)
-
             cv_json: dict = accumulated.get("cv_json") or {}
 
-            # Preserve user edits from previous CV
             async with AsyncSessionLocal() as db:
                 prev_cv = await cv_svc.get_previous_cv_for_user(db, UUID(user_id), UUID(cv_id))
             if prev_cv and prev_cv.data:
@@ -97,7 +91,7 @@ def init_profile(self, cv_id: str, user_id: str, pdf_path: str) -> dict:
                     raw_text=accumulated.get("cv_text", ""),
                     data=cv_json,
                 )
-            logger.info("[init_profile] completed — cv_id=%s name=%s", cv_id, cv_json.get("full_name"))
+            logger.info("[init_profile] completed — cv_id=%s", cv_id)
 
         except Exception as exc:
             await prog.publish_done(cv_id)
@@ -109,15 +103,13 @@ def init_profile(self, cv_id: str, user_id: str, pdf_path: str) -> dict:
 
 
 # ─── Task: run_search ─────────────────────────────────────────────────────────
-# Runs the full job-search pipeline using profile data (cv.data + user.preferences).
-# No PDF needed. Called on demand from the profile page.
 
 @celery_app.task(
     name="app.worker.tasks.run_search",
     bind=True,
     max_retries=0,
-    time_limit=600,
-    soft_time_limit=540,
+    time_limit=300,
+    soft_time_limit=270,
 )
 def run_search(self, analysis_id: str, cv_id: str, user_id: str) -> dict:
     """Run job search pipeline from profile data. Progress events keyed on analysis_id."""
@@ -135,7 +127,6 @@ def run_search(self, analysis_id: str, cv_id: str, user_id: str) -> dict:
     logger.info("[run_search] started — analysis_id=%s", analysis_id)
 
     async def _run() -> None:
-        # Load profile data from DB
         async with AsyncSessionLocal() as db:
             cv   = await cv_svc.get_cv(db, UUID(cv_id))
             user = await user_svc.get_user_by_id(db, UUID(user_id))
@@ -148,15 +139,10 @@ def run_search(self, analysis_id: str, cv_id: str, user_id: str) -> dict:
 
         state = {
             "cv_json":          cv_json,
-            "user_keywords":    [],
-            "keywords":         [],
             "user_locations":   prefs.get("locations") or [],
             "contract_type":    contracts[0] if contracts else "",
             "remote":           "remote" in work_modes,
-            "date_posted":      "",
             "experience_level": "",
-            "failed_keywords":  [],
-            "search_attempts":  0,
             "jobs":             [],
             "filtered_jobs":    [],
             "matches":          [],
@@ -177,16 +163,11 @@ def run_search(self, analysis_id: str, cv_id: str, user_id: str) -> dict:
 
             await prog.publish_done(analysis_id)
 
-            keywords_used: list[str] = accumulated.get("keywords") or []
-            if keywords_used:
-                from app.cortex.registry import register_keywords
-                await register_keywords(keywords_used)
-
             async with AsyncSessionLocal() as db:
                 await analysis_svc.update_analysis(
                     db, UUID(analysis_id),
                     status="completed",
-                    keywords=accumulated.get("keywords", []),
+                    keywords=[],
                     matches=accumulated.get("matches", []),
                     final_report=accumulated.get("final_report", ""),
                 )
@@ -208,166 +189,88 @@ def run_search(self, analysis_id: str, cv_id: str, user_id: str) -> dict:
     return {"analysis_id": analysis_id}
 
 
-# ─── Task: run_pipeline (deprecated — kept for backwards compat) ──────────────
+# ─── Tasks: provider ingestion ────────────────────────────────────────────────
 
 @celery_app.task(
-    name="app.worker.tasks.run_pipeline",
+    name="app.worker.tasks.ingest_france_travail",
     bind=True,
-    max_retries=0,
-    time_limit=600,
-    soft_time_limit=540,
+    max_retries=2,
+    default_retry_delay=300,
 )
-def run_pipeline(
-    self,
-    analysis_id: str,
-    pdf_path: str,
-    cv_id: str,
-    user_id: str,
-    user_keywords: list[str],
-    user_locations: list[str],
-    contract_type: str,
-    remote: bool,
-    date_posted: str,
-    experience_level: str,
-) -> dict:
-    """
-    Celery task — Run the full LangGraph pipeline for one CV analysis.
-    Progress events are published to Redis Pub/Sub so the FastAPI SSE
-    endpoint can stream them to the browser in real time.
-    """
-    # All models must be imported before any service — SQLAlchemy mapper resolves
-    # relationship("User") lazily but needs User in registry before first query.
-    import app.users.models    # noqa: F401
-    import app.cv.models       # noqa: F401
-    import app.analysis.models  # noqa: F401
+def ingest_france_travail(self) -> dict:
+    """Fetch jobs from France Travail API and store in Cortex."""
+    from app.cortex.ingestion import run_provider_ingestion
+    from app.cortex.providers.france_travail import FranceTravailProvider
 
-    from app.analysis import progress as prog
-    from app.analysis import service as analysis_svc
-    from app.cv import service as cv_svc
-    from app.db.session import AsyncSessionLocal
-    from app.pipeline.graph import pipeline
+    logger.info("[worker] ingest_france_travail started")
+    try:
+        _dispose_engines()
+        result = asyncio.run(run_provider_ingestion(FranceTravailProvider()))
+        logger.info("[worker] ingest_france_travail done — %s", result)
+        return result
+    except Exception as exc:
+        logger.error("[worker] ingest_france_travail failed: %s", exc, exc_info=True)
+        raise self.retry(exc=exc)
 
-    logger.info("[pipeline] task started — analysis_id=%s", analysis_id)
 
-    async def _run() -> None:
-        initial_state = {
-            "pdf_path":         pdf_path,
-            "cv_text":          "",
-            "cv_json":          None,
-            "user_keywords":    user_keywords,
-            "keywords":         [],
-            "user_locations":   user_locations,
-            "contract_type":    contract_type,
-            "remote":           remote,
-            "date_posted":      date_posted,
-            "experience_level": experience_level,
-            "failed_keywords":  [],
-            "search_attempts":  0,
-            "jobs":             [],
-            "filtered_jobs":    [],
-            "matches":          [],
-            "final_report":     "",
-            "messages":         [],
-        }
+@celery_app.task(
+    name="app.worker.tasks.ingest_greenhouse",
+    bind=True,
+    max_retries=2,
+    default_retry_delay=300,
+)
+def ingest_greenhouse(self) -> dict:
+    """Fetch jobs from Greenhouse (French companies) and store in Cortex."""
+    from app.cortex.ingestion import run_provider_ingestion
+    from app.cortex.providers.greenhouse import GreenhouseProvider
 
-        try:
-            accumulated: dict = dict(initial_state)
-            async for chunk in pipeline.astream(initial_state, stream_mode="updates"):
-                node_name = next(iter(chunk))
-                node_output = chunk[node_name]
-                # LangGraph emits None for internal nodes (__start__ etc.) — skip them
-                if node_output is not None:
-                    await prog.publish(analysis_id, node_name)
-                    accumulated.update(node_output)
-                    logger.debug("[pipeline] node=%s done", node_name)
+    logger.info("[worker] ingest_greenhouse started")
+    try:
+        _dispose_engines()
+        result = asyncio.run(run_provider_ingestion(GreenhouseProvider()))
+        logger.info("[worker] ingest_greenhouse done — %s", result)
+        return result
+    except Exception as exc:
+        logger.error("[worker] ingest_greenhouse failed: %s", exc, exc_info=True)
+        raise self.retry(exc=exc)
 
-            await prog.publish_done(analysis_id)
-            result = accumulated
 
-            # Register keywords in the cortex registry so the nightly cron
-            # can refresh Adzuna for queries that real users actually searched.
-            keywords_used: list[str] = result.get("keywords") or []
-            if keywords_used:
-                from app.cortex.registry import register_keywords
-                await register_keywords(keywords_used)
+@celery_app.task(
+    name="app.worker.tasks.ingest_lever",
+    bind=True,
+    max_retries=2,
+    default_retry_delay=300,
+)
+def ingest_lever(self) -> dict:
+    """Fetch jobs from Lever (French companies) and store in Cortex."""
+    from app.cortex.ingestion import run_provider_ingestion
+    from app.cortex.providers.lever import LeverProvider
 
-            # Merge user-curated profile fields from the previous CV so edits
-            # made in the profile page survive a new PDF upload.
-            # Rules:
-            #   - roles      → preserve previous (user-curated job titles)
-            #   - skills     → union of previous + new AI-extracted skills
-            #   - hobbies    → preserve previous if new PDF didn't extract any
-            #   - everything else (experiences, education, contact info, level)
-            #     → take fresh from new AI extraction (correct for a new PDF)
-            cv_json: dict = result.get("cv_json") or {}
-            async with AsyncSessionLocal() as db:
-                prev_cv = await cv_svc.get_previous_cv_for_user(
-                    db, UUID(user_id), UUID(cv_id)
-                )
-            if prev_cv and prev_cv.data:
-                prev = prev_cv.data
-                if prev.get("roles"):
-                    cv_json["roles"] = prev["roles"]
-                prev_skills = set(prev.get("skills") or [])
-                new_skills  = set(cv_json.get("skills") or [])
-                cv_json["skills"] = list(new_skills | prev_skills)
-                if prev.get("hobbies") and not cv_json.get("hobbies"):
-                    cv_json["hobbies"] = prev["hobbies"]
-
-            async with AsyncSessionLocal() as db:
-                await cv_svc.update_cv(
-                    db, UUID(cv_id),
-                    raw_text=result.get("cv_text", ""),
-                    data=cv_json,
-                )
-                await analysis_svc.update_analysis(
-                    db, UUID(analysis_id),
-                    status="completed",
-                    keywords=result.get("keywords", []),
-                    matches=result.get("matches", []),
-                    final_report=result.get("final_report", ""),
-                )
-
-            logger.info(
-                "[pipeline] completed — analysis_id=%s matches=%d",
-                analysis_id, len(result.get("matches", [])),
-            )
-            await prog.clear(analysis_id)
-
-        except Exception as exc:
-            await prog.publish_done(analysis_id)
-            logger.error(
-                "[pipeline] failed — analysis_id=%s | %s", analysis_id, exc, exc_info=True
-            )
-            async with AsyncSessionLocal() as db:
-                await analysis_svc.update_analysis(
-                    db, UUID(analysis_id), status="failed", error=str(exc)
-                )
-
-    _dispose_engines()
-    asyncio.run(_run())
-    return {"analysis_id": analysis_id}
+    logger.info("[worker] ingest_lever started")
+    try:
+        _dispose_engines()
+        result = asyncio.run(run_provider_ingestion(LeverProvider()))
+        logger.info("[worker] ingest_lever done — %s", result)
+        return result
+    except Exception as exc:
+        logger.error("[worker] ingest_lever failed: %s", exc, exc_info=True)
+        raise self.retry(exc=exc)
 
 
 @celery_app.task(
     name="app.worker.tasks.full_ingestion",
     bind=True,
-    max_retries=3,
-    default_retry_delay=300,  # retry after 5 min
+    max_retries=2,
+    default_retry_delay=300,
 )
-def full_ingestion(self, locations: list[str] | None = None) -> dict:
-    """
-    Celery task — Refresh the Cortex using keywords from real user pipelines.
-    Only fetches Adzuna offers from the last 3 days — skips if registry is empty.
-    Scheduled nightly by Celery Beat.
-    Can also be triggered manually via POST /cortex/ingest/full.
-    """
-    from app.cortex.ingestion import run_ingestion_from_registry
+def full_ingestion(self) -> dict:
+    """Run all providers sequentially. Scheduled nightly by Celery Beat."""
+    from app.cortex.ingestion import run_all_providers
 
-    logger.info("[worker] full_ingestion started — locations=%s", locations)
+    logger.info("[worker] full_ingestion started")
     try:
         _dispose_engines()
-        result = asyncio.run(run_ingestion_from_registry(locations=locations))
+        result = asyncio.run(run_all_providers())
         logger.info("[worker] full_ingestion done — %s", result)
         return result
     except Exception as exc:
@@ -375,30 +278,7 @@ def full_ingestion(self, locations: list[str] | None = None) -> dict:
         raise self.retry(exc=exc)
 
 
-@celery_app.task(
-    name="app.worker.tasks.feed_cortex_from_fallback",
-    bind=True,
-    max_retries=2,
-    default_retry_delay=60,
-)
-def feed_cortex_from_fallback(self, jobs: list[dict]) -> dict:
-    """
-    Celery task — Store jobs found via API fallback into the Cortex.
-    Triggered automatically by cortex_feed_node after each successful API fallback.
-    This is how the Cortex self-enriches from real user searches.
-    """
-    from app.cortex.ingestion import store_jobs_from_fallback
-
-    logger.info("[worker] feed_cortex_from_fallback — %d jobs", len(jobs))
-    try:
-        _dispose_engines()
-        result = asyncio.run(store_jobs_from_fallback(jobs))
-        logger.info("[worker] feed done — %s", result)
-        return result
-    except Exception as exc:
-        logger.error("[worker] feed failed: %s", exc, exc_info=True)
-        raise self.retry(exc=exc)
-
+# ─── Task: refresh_user_analyses ─────────────────────────────────────────────
 
 @celery_app.task(
     name="app.worker.tasks.refresh_user_analyses",
@@ -408,18 +288,19 @@ def feed_cortex_from_fallback(self, jobs: list[dict]) -> dict:
 )
 def refresh_user_analyses(self) -> dict:
     """
-    Celery task — Nightly per-user analysis refresh.
-    For each completed analysis whose cortex_snapshot_at is older than cortex_updated_at:
-      1. Re-run cortex_search (embedding only, no Adzuna)
-      2. Compare returned job hashes with stored matches
-      3. If new jobs found → run embeddings_filter + llm_reranker + report_generator
-      4. If unchanged → just update cortex_snapshot_at (free)
+    Nightly per-user refresh.
+    For each completed analysis whose cortex_snapshot_at < cortex_updated_at:
+      1. Re-run cortex_search
+      2. If new jobs found → run embeddings_filter + llm_reranker + report_generator
+      3. If unchanged → just update cortex_snapshot_at (free)
     Scheduled at 3h — after the 2h ingestion cron.
     """
     logger.info("[worker] refresh_user_analyses started")
 
     async def _run() -> dict:
-        from datetime import timezone
+        import app.users.models    # noqa: F401
+        import app.cv.models       # noqa: F401
+        import app.analysis.models # noqa: F401
 
         from app.analysis import service as analysis_svc
         from app.cortex import service as cortex_svc
@@ -431,13 +312,9 @@ def refresh_user_analyses(self) -> dict:
         from app.pipeline.nodes.llm_reranker import llm_reranker_node
         from app.pipeline.nodes.report_generator import report_generator_node
 
-        import app.users.models    # noqa: F401
-        import app.cv.models       # noqa: F401
-        import app.analysis.models # noqa: F401
-
         cortex_updated_at = await get_cortex_updated_at()
         if cortex_updated_at is None:
-            logger.info("[refresh] cortex_updated_at not set — Cortex never received new jobs")
+            logger.info("[refresh] cortex_updated_at not set — skipping")
             return {"checked": 0, "refreshed": 0, "skipped": 0}
 
         async with AsyncSessionLocal() as db:
@@ -453,7 +330,6 @@ def refresh_user_analyses(self) -> dict:
                 if not cv or not cv.data:
                     continue
 
-                # Load user preferences — used instead of stored search_filters when set
                 from app.users import service as user_svc
                 async with AsyncSessionLocal() as db:
                     user = await user_svc.get_user_by_id(db, analysis.user_id)
@@ -461,45 +337,32 @@ def refresh_user_analyses(self) -> dict:
                 user_prefs     = (user.preferences or {}) if user else {}
                 search_filters = analysis.search_filters or {}
 
-                pref_locations    = user_prefs.get("locations", [])
-                pref_contracts    = user_prefs.get("contract_types", [])
-                pref_work_modes   = user_prefs.get("work_modes", [])
-
-                # Profile preferences override stored search_filters when set
-                resolved_locations    = pref_locations  if pref_locations  else search_filters.get("locations", [])
-                resolved_contract     = pref_contracts[0] if pref_contracts else search_filters.get("contract_type", "")
-                resolved_remote       = ("remote" in pref_work_modes) if pref_work_modes else search_filters.get("remote", False)
-                resolved_exp_level    = search_filters.get("experience_level", "")
-
-                cv_json = cv.data
+                pref_locations  = user_prefs.get("locations", [])
+                pref_contracts  = user_prefs.get("contract_types", [])
+                pref_work_modes = user_prefs.get("work_modes", [])
 
                 state = {
-                    "cv_json":          cv_json,
-                    "user_keywords":    search_filters.get("user_keywords", []),
-                    "user_locations":   resolved_locations,
-                    "contract_type":    resolved_contract,
-                    "remote":           resolved_remote,
-                    "experience_level": resolved_exp_level,
-                    "keywords":         analysis.keywords or [],
+                    "cv_json":          cv.data,
+                    "user_locations":   pref_locations or search_filters.get("locations", []),
+                    "contract_type":    pref_contracts[0] if pref_contracts else search_filters.get("contract_type", ""),
+                    "remote":           ("remote" in pref_work_modes) if pref_work_modes else search_filters.get("remote", False),
+                    "experience_level": search_filters.get("experience_level", ""),
                     "jobs":             [],
                     "filtered_jobs":    [],
                     "matches":          [],
                     "final_report":     "",
-                    "failed_keywords":  [],
-                    "search_attempts":  0,
+                    "messages":         [],
                     "pdf_path":         "",
                     "cv_text":          "",
-                    "date_posted":      "",
-                    "messages":         [],
                 }
 
-                # 1. Cortex search (no Adzuna in refresh context)
+                # 1. Cortex search
                 cortex_result = await cortex_search_node(state)
                 state.update(cortex_result)
 
-                new_pool = state.get("filtered_jobs") or []
+                new_pool = state.get("jobs") or []
 
-                # Always update snapshot so we don't re-check until next ingestion
+                # Always update snapshot timestamp
                 async with AsyncSessionLocal() as db:
                     await analysis_svc.update_analysis(
                         db, analysis.id, cortex_snapshot_at=cortex_updated_at
@@ -525,13 +388,9 @@ def refresh_user_analyses(self) -> dict:
 
                 if not (new_hashes - existing_hashes):
                     skipped += 1
-                    logger.debug("[refresh] analysis %s — no new jobs, snapshot updated", analysis.id)
                     continue
 
-                # 3. New jobs — run embeddings_filter → llm_reranker → report_generator
-                state["jobs"]         = new_pool
-                state["filtered_jobs"] = []
-
+                # 3. New jobs found — run embeddings_filter → llm_reranker → report_generator
                 emb_result = await embeddings_filter_node(state)
                 state.update(emb_result)
 
@@ -550,7 +409,7 @@ def refresh_user_analyses(self) -> dict:
                     )
 
                 refreshed += 1
-                logger.info("[refresh] analysis %s refreshed with new matches", analysis.id)
+                logger.info("[refresh] analysis %s refreshed", analysis.id)
 
             except Exception as exc:
                 logger.error("[refresh] analysis %s failed: %s", analysis.id, exc, exc_info=True)
@@ -568,6 +427,8 @@ def refresh_user_analyses(self) -> dict:
         raise self.retry(exc=exc)
 
 
+# ─── Task: cleanup_old_jobs ───────────────────────────────────────────────────
+
 @celery_app.task(
     name="app.worker.tasks.cleanup_old_jobs",
     bind=True,
@@ -575,10 +436,7 @@ def refresh_user_analyses(self) -> dict:
     default_retry_delay=60,
 )
 def cleanup_old_jobs(self, days: int = 30) -> dict:
-    """
-    Celery task — Deactivate jobs not seen in the last N days.
-    Scheduled weekly by Celery Beat.
-    """
+    """Deactivate jobs not seen in the last N days. Scheduled weekly."""
     from app.cortex import service as cortex_svc
     from app.cortex.db import CortexSessionLocal
 

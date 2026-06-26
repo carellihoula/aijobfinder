@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     ADZUNA_APP_KEY: str = ""
     ADZUNA_COUNTRY: str = "fr"
 
+    FRANCE_TRAVAIL_CLIENT_ID: str = ""
+    FRANCE_TRAVAIL_CLIENT_SECRET: str = ""
+
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = ""  # empty = console only; set to e.g. "logs/app.log" for file output
 
