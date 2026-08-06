@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.admin.router import router as admin_router
 from app.analysis.router import router as analysis_router
+from app.applications.router import router as applications_router
 from app.auth.router import router as auth_router
 from app.cover_letter.router import router as cover_letter_router
 from app.config import settings
@@ -47,6 +48,7 @@ app.include_router(auth_router)
 app.include_router(users_router)
 app.include_router(admin_router)
 app.include_router(analysis_router)
+app.include_router(applications_router)
 app.include_router(cover_letter_router)
 app.include_router(cortex_router)
 

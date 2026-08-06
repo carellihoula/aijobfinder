@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     ADMIN_EMAILS: str = ""
 
     OPENAI_API_KEY: str = ""
-    OPENAI_MODEL: str = "gpt-4o-mini"
+    OPENAI_MODEL: str = "gpt-5-nano"
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
     ANTHROPIC_API_KEY: str = ""
     ANTHROPIC_MODEL: str = "claude-3-5-haiku-20241022"
@@ -38,6 +38,17 @@ class Settings(BaseSettings):
 
     FRANCE_TRAVAIL_CLIENT_ID: str = ""
     FRANCE_TRAVAIL_CLIENT_SECRET: str = ""
+
+    # SMTP — leave SMTP_HOST empty for dev mode (links printed to console)
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = ""
+    SMTP_FROM_NAME: str = "AILFJ"
+
+    # Frontend base URL — used to build links in emails
+    APP_URL: str = "http://localhost:5173"
 
     LOG_LEVEL: str = "INFO"
     LOG_FILE: str = ""  # empty = console only; set to e.g. "logs/app.log" for file output

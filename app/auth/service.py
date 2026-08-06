@@ -2,7 +2,8 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.schemas import LoginRequest, RegisterRequest
-from app.auth.utils import create_access_token, hash_password, verify_password
+from app.auth.utils import create_access_token, create_typed_token, hash_password, verify_password
+from app.email import send_verification_email
 from app.logger import get_logger
 from app.users.service import create_user, get_user_by_email
 
@@ -16,6 +17,10 @@ async def register(db: AsyncSession, data: RegisterRequest) -> str:
 
     user = await create_user(db, data.email, hash_password(data.password), data.full_name)
     logger.info("[auth] New user registered: %s (id=%s)", data.email, user.id)
+
+    verify_token = create_typed_token(str(user.id), "verify", expires_minutes=60 * 24)
+    await send_verification_email(user.email, verify_token)
+
     return create_access_token({"sub": str(user.id)})
 
 

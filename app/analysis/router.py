@@ -47,12 +47,13 @@ async def upload_cv(
     if len(content) > settings.MAX_FILE_SIZE_MB * 1024 * 1024:
         raise HTTPException(status_code=413, detail=f"File exceeds {settings.MAX_FILE_SIZE_MB} MB limit")
 
-    # Dedup: same PDF already extracted → return existing cv_id, skip re-extraction
+    # Dedup: compare only against the user's current latest CV.
+    # A match against any older CV is irrelevant — the user may have since changed CVs.
     pdf_hash = hashlib.sha256(content).hexdigest()
-    existing_cv = await cv_svc.get_cv_by_hash(db, current_user.id, pdf_hash)
-    if existing_cv and existing_cv.data:
-        logger.info("[upload] Same CV hash — returning existing cv_id=%s", existing_cv.id)
-        return {"cv_id": str(existing_cv.id), "status": "ready"}
+    latest_cv = await cv_svc.get_latest_cv_for_user(db, current_user.id)
+    if latest_cv and latest_cv.pdf_hash == pdf_hash and latest_cv.data:
+        logger.info("[upload] Same as latest CV hash — skipping re-extraction cv_id=%s", latest_cv.id)
+        return {"cv_id": str(latest_cv.id), "status": "ready"}
 
     cv_id       = uuid_lib.uuid4()
     storage_key = await save_cv(content, str(current_user.id), str(cv_id), file.filename)
@@ -161,7 +162,7 @@ async def get_cv_data(
     db: AsyncSession = Depends(get_db),
 ):
     cv = await cv_svc.get_latest_cv_for_user(db, current_user.id)
-    if not cv or not cv.data:
+    if not cv or cv.data is None:
         raise HTTPException(status_code=404, detail="No CV data found")
     return cv.data
 

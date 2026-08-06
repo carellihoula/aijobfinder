@@ -2,11 +2,13 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analysis.schemas import AnalysisResponse
 from app.analysis.service import get_user_analyses
 from app.auth.dependencies import get_current_user
+from app.auth.utils import hash_password, verify_password
 from app.db.session import get_db
 from app.storage import delete_file, read_file, save_avatar
 from app.users.models import User
@@ -103,6 +105,58 @@ async def delete_avatar(
     if current_user.avatar_key:
         await delete_file(current_user.avatar_key)
         await user_svc.update_avatar_key(db, current_user.id, None)
+
+
+class UpdateProfileRequest(BaseModel):
+    full_name: str | None = None
+    email: EmailStr | None = None
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+@router.patch("/me", response_model=UserResponse)
+async def update_profile(
+    payload: UpdateProfileRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update full_name and/or email."""
+    if payload.email and payload.email != current_user.email:
+        existing = await user_svc.get_user_by_email(db, payload.email)
+        if existing:
+            raise HTTPException(status_code=409, detail="Email already in use")
+    user = await user_svc.update_user_profile(
+        db, current_user.id,
+        full_name=payload.full_name,
+        email=str(payload.email) if payload.email else None,
+    )
+    return user
+
+
+@router.post("/me/change-password", status_code=204)
+async def change_password(
+    payload: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Change password after verifying the current one."""
+    if not verify_password(payload.current_password, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    if len(payload.new_password) < 8:
+        raise HTTPException(status_code=400, detail="New password must be at least 8 characters")
+    await user_svc.update_user_password(db, current_user.id, hash_password(payload.new_password))
+
+
+@router.delete("/me", status_code=204)
+async def delete_account(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Deactivate the account (soft delete)."""
+    await user_svc.deactivate_user(db, current_user.id)
 
 
 @router.patch("/me/preferences")

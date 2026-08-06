@@ -57,3 +57,40 @@ async def update_user_preferences(db: AsyncSession, user_id: UUID, preferences: 
         await db.commit()
         await db.refresh(user)
     return user
+
+
+async def update_user_profile(db: AsyncSession, user_id: UUID, full_name: str | None = None, email: str | None = None) -> User | None:
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user:
+        if full_name is not None:
+            user.full_name = full_name
+        if email is not None:
+            user.email = email
+        await db.commit()
+        await db.refresh(user)
+    return user
+
+
+async def update_user_password(db: AsyncSession, user_id: UUID, hashed_password: str) -> None:
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user:
+        user.hashed_password = hashed_password
+        await db.commit()
+
+
+async def verify_user(db: AsyncSession, user_id: UUID) -> None:
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user:
+        user.is_verified = True
+        await db.commit()
+
+
+async def deactivate_user(db: AsyncSession, user_id: UUID) -> None:
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user:
+        user.is_active = False
+        await db.commit()

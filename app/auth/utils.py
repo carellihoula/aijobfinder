@@ -29,3 +29,19 @@ def decode_token(token: str) -> Optional[dict]:
         return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
     except JWTError:
         return None
+
+
+def create_typed_token(user_id: str, token_type: str, expires_minutes: int) -> str:
+    return create_access_token(
+        {"sub": user_id, "type": token_type},
+        expires_delta=timedelta(minutes=expires_minutes),
+    )
+
+
+def decode_typed_token(token: str, expected_type: str) -> Optional[str]:
+    payload = decode_token(token)
+    if not payload:
+        return None
+    if payload.get("type") != expected_type:
+        return None
+    return payload.get("sub")

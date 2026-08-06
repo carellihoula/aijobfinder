@@ -458,3 +458,66 @@ def cleanup_old_jobs(self, days: int = 30) -> dict:
     except Exception as exc:
         logger.error("[worker] cleanup failed: %s", exc, exc_info=True)
         raise self.retry(exc=exc)
+
+
+# ─── Task: generate_application_cover_letter ──────────────────────────────────
+
+@celery_app.task(
+    name="app.worker.tasks.generate_application_cover_letter",
+    bind=True,
+    max_retries=0,
+    time_limit=120,
+    soft_time_limit=100,
+)
+def generate_application_cover_letter(
+    self,
+    application_id: str,
+    job: dict,
+    user_id: str,
+    suggestion: str = "",
+    previous_content: dict | None = None,
+) -> dict:
+    """Generate (or refine) a cover letter for a manually-added application. Runs off the
+    request/response cycle since the LLM structured-output call can take ~30-60s."""
+    import app.users.models        # noqa: F401
+    import app.cv.models           # noqa: F401
+    import app.analysis.models     # noqa: F401
+    import app.applications.models # noqa: F401
+
+    from app.applications import service as applications_svc
+    from app.cover_letter.generator import generate_cover_letter
+    from app.cv import service as cv_svc
+    from app.db.session import AsyncSessionLocal
+    from app.users import service as user_svc
+
+    logger.info("[generate_application_cover_letter] started — application_id=%s", application_id)
+
+    async def _run() -> None:
+        async with AsyncSessionLocal() as db:
+            cv = await cv_svc.get_latest_cv_for_user(db, UUID(user_id))
+            user = await user_svc.get_user_by_id(db, UUID(user_id))
+        cv_data = (cv.data or {}) if cv else {}
+        gender = (user.preferences or {}).get("gender", "") if user and user.preferences else ""
+
+        try:
+            content = await generate_cover_letter(
+                cv_data, job, suggestion=suggestion, previous_content=previous_content, gender=gender,
+            )
+            async with AsyncSessionLocal() as db:
+                await applications_svc.set_cover_letter_result(
+                    db, UUID(application_id), status="completed", content=content.model_dump(),
+                )
+            logger.info("[generate_application_cover_letter] completed — application_id=%s", application_id)
+        except Exception as exc:
+            logger.error(
+                "[generate_application_cover_letter] failed — application_id=%s | %s",
+                application_id, exc, exc_info=True,
+            )
+            async with AsyncSessionLocal() as db:
+                await applications_svc.set_cover_letter_result(
+                    db, UUID(application_id), status="failed", content=None,
+                )
+
+    _dispose_engines()
+    asyncio.run(_run())
+    return {"application_id": application_id}

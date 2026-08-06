@@ -10,6 +10,7 @@ class UserResponse(BaseModel):
     full_name: str
     is_active: bool
     is_admin: bool
+    is_verified: bool
     created_at: datetime
     avatar_key: str | None = None
 

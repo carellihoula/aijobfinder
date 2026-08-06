@@ -19,6 +19,12 @@ FRENCH_COMPANIES: list[tuple[str, str]] = [
     ("doctolib",   "Doctolib"),
     ("dataiku",    "Dataiku"),
     ("algolia",    "Algolia"),
+    ("ouihelp",    "OuiHelp"),
+    ("wakam",      "Wakam"),
+    ("gruve",      "Gruve"),
+    ("kaluza",     "Kaluza"),
+    ("dashlane",   "Dashlane"),
+    
 ]
 
 
