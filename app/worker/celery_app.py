@@ -38,6 +38,13 @@ celery_app.conf.beat_schedule = {
         "task": "app.worker.tasks.ingest_lever",
         "schedule": crontab(minute=30, hour=1),
     },
+    # JobSpy (Indeed/LinkedIn/Google Jobs) — once daily at 00:15. Real HTTP scraping,
+    # much slower than the JSON-API providers above — can take up to ~55 minutes,
+    # comfortably finished before Greenhouse/Lever start at 01:15/01:30.
+    "ingest-jobspy": {
+        "task": "app.worker.tasks.ingest_jobspy",
+        "schedule": crontab(minute=15, hour=0),
+    },
     # Per-user nightly refresh — at 03:45, after the 03:00 France Travail ingestion finishes
     "refresh-user-analyses-nightly": {
         "task": "app.worker.tasks.refresh_user_analyses",

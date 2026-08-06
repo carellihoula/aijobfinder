@@ -258,6 +258,32 @@ def ingest_lever(self) -> dict:
 
 
 @celery_app.task(
+    name="app.worker.tasks.ingest_jobspy",
+    bind=True,
+    max_retries=1,
+    default_retry_delay=600,
+    time_limit=2100,
+    soft_time_limit=1800,
+)
+def ingest_jobspy(self) -> dict:
+    """Scrape Indeed, LinkedIn and Google Jobs (France) via python-jobspy and store in Cortex.
+    Per-site/per-query failures are isolated inside the provider — this task only fails on
+    something unrelated to a single site being unreachable."""
+    from app.cortex.ingestion import run_provider_ingestion
+    from app.cortex.providers.jobspy_provider import JobSpyProvider
+
+    logger.info("[worker] ingest_jobspy started")
+    try:
+        _dispose_engines()
+        result = asyncio.run(run_provider_ingestion(JobSpyProvider()))
+        logger.info("[worker] ingest_jobspy done — %s", result)
+        return result
+    except Exception as exc:
+        logger.error("[worker] ingest_jobspy failed: %s", exc, exc_info=True)
+        raise self.retry(exc=exc)
+
+
+@celery_app.task(
     name="app.worker.tasks.full_ingestion",
     bind=True,
     max_retries=2,
