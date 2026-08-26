@@ -1,0 +1,445 @@
+import { useEffect, useMemo, useState } from "react"
+import { useNavigate } from "react-router-dom"
+import { FileText, RefreshCw, AlertCircle, Search, Loader2, Clock } from "lucide-react"
+import { getAnalysis, getCvData, launchSearch } from "../api/analysis"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { QK, useLatestAnalysis } from "../lib/queries"
+import type { Analysis, JobMatch as BackendJobMatch } from "../types"
+import Layout from "../components/Layout"
+import { MatchSkeletonList } from "../components/Skeletons"
+
+import MatchCard from "../components/MatchCard"
+import MarkdownReport from "../components/MarkdownReport"
+import FilterBar from "../components/FilterBar"
+import EmptyState from "../components/states/EmptyState"
+import {
+  DEFAULT_FILTERS,
+  applyFilters,
+} from "../lib/designTypes"
+import type {
+  DesignJobMatch,
+  MatchFilters,
+  ContractType,
+  WorkMode,
+} from "../lib/designTypes"
+
+const POLL_MS = 3_000
+
+const NODE_PROGRESS: Record<string, number> = {
+  pdf_parser:        12,
+  cv_structurer:     28,
+  cortex_search:     45,
+  keyword_extractor: 50,
+  job_search:        62,
+  cortex_feed:       65,
+  prepare_retry:     67,
+  embeddings_filter: 75,
+  llm_reranker:      88,
+  report_generator:  97,
+}
+
+const CONTRACT_MAP: Record<string, ContractType> = {
+  "CDI":               "CDI",
+  "Freelance / CDD":   "Freelance",
+  "Stage / Alternance":"Stage",
+  "Temps partiel":     "CDD",
+}
+
+function formatPosted(raw: string): { label: string; days: number } | undefined {
+  if (!raw) return undefined
+  try {
+    const date = new Date(raw)
+    const days = Math.floor((Date.now() - date.getTime()) / 86_400_000)
+    const label =
+      days === 0 ? "Aujourd'hui" :
+      days === 1 ? "Hier" :
+      days < 7   ? `Il y a ${days} j` :
+      days < 30  ? `Il y a ${Math.floor(days / 7)} sem.` :
+      date.toLocaleDateString("fr-FR", { day: "numeric", month: "short" })
+    return { label, days }
+  } catch { return undefined }
+}
+
+function formatDate(iso: string) {
+  try {
+    return new Date(iso).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })
+  } catch { return iso }
+}
+
+function adaptMatch(m: BackendJobMatch, index: number): DesignJobMatch {
+  const posted = formatPosted(m.job.date)
+  return {
+    id: `${m.job.company}_${m.job.title}_${index}`.replace(/\s+/g, "_"),
+    originalIndex: index,
+    title:    m.job.title,
+    company:  m.job.company,
+    logo:     m.job.company?.[0]?.toUpperCase() ?? "?",
+    location: m.job.location || "Non précisé",
+    mode:     (m.job.remote ? "Remote" : "Sur site") as WorkMode,
+    contract: CONTRACT_MAP[m.job.contract_type] ?? (m.job.contract_type as ContractType) ?? "CDI",
+    seniority: "",
+    score:    m.score,
+    posted:   posted?.label,
+    postedDays: posted?.days,
+    reason:   m.reason,
+    description: m.job.desc,
+    missions: [],
+    matchedSkills: m.matching_skills,
+    missingSkills: m.missing_skills,
+    url:      m.job.url || undefined,
+  }
+}
+
+// ─── Processing view ─────────────────────────────────────────────────────────
+function ProcessingView({ progress, step }: { progress: number; step: string }) {
+  return (
+    <div className="animate-fade-up">
+      <div className="card rounded-xl p-6 mb-6">
+        <div className="flex items-center gap-3 mb-4">
+          <span className="h-2 w-2 rounded-full bg-accent pulse-dot" />
+          <span className="text-sm font-medium text-ink">Analyse en cours</span>
+          <span className="ml-auto text-sm font-mono text-accent">{progress}%</span>
+        </div>
+        {/* Progress bar */}
+        <div className="h-1.5 bg-line/10 rounded-full overflow-hidden">
+          <div
+            className="h-full bg-accent rounded-full transition-all duration-700"
+            style={{ width: `${progress}%` }}
+          />
+        </div>
+        <p className="mt-3 text-xs text-muted">{step}</p>
+      </div>
+      <MatchSkeletonList count={3} />
+    </div>
+  )
+}
+
+// ─── Dashboard header ─────────────────────────────────────────────────────────
+function AnalysisHeader({ analysis }: { analysis: Analysis }) {
+  const count  = analysis.matches?.length ?? 0
+  const strong = analysis.matches?.filter((m) => m.score >= 5).length ?? 0
+
+  return (
+    <div className="flex flex-col sm:flex-row sm:items-center gap-4 mb-6">
+      <div>
+        <h1 className="text-lg font-semibold text-ink">Résultats de votre analyse</h1>
+        <p className="text-xs text-muted mt-0.5">
+          Mise à jour le {formatDate(analysis.created_at)} · Actualisation automatique chaque nuit
+        </p>
+      </div>
+      <div className="flex items-center gap-3 sm:ml-auto">
+        <div className="card rounded-lg px-3 py-2 text-center min-w-[64px]">
+          <div className="text-lg font-semibold text-ink">{count}</div>
+          <div className="text-[10px] text-muted uppercase tracking-wide">offres</div>
+        </div>
+        <div className="card rounded-lg px-3 py-2 text-center min-w-[64px]">
+          <div className="text-lg font-semibold text-accent">{strong}</div>
+          <div className="text-[10px] text-muted uppercase tracking-wide">forts matchs</div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── No-search CTA ───────────────────────────────────────────────────────────
+const RL_KEY = "ailfj_search_rl_at"
+
+function NoSearchCTA({
+  onLaunch, launching, rateLimited, inProgress,
+}: {
+  onLaunch: () => void
+  launching: boolean
+  rateLimited: boolean
+  inProgress: boolean
+}) {
+  const blocked = rateLimited || inProgress
+  const hours = (() => {
+    const ts = localStorage.getItem(RL_KEY)
+    return ts ? Math.max(1, Math.ceil((24 * 3_600_000 - (Date.now() - Number(ts))) / 3_600_000)) : 24
+  })()
+  const tooltip = rateLimited
+    ? `Limite atteinte — réessayez dans ${hours}h`
+    : inProgress ? "Une recherche est déjà en cours" : null
+
+  return (
+    <div className="animate-fade-up py-16 flex flex-col items-center gap-4 text-center">
+      <div className="h-14 w-14 rounded-2xl bg-accent/10 flex items-center justify-center">
+        <Search className="h-7 w-7 text-accent" />
+      </div>
+      <div>
+        <h2 className="text-lg font-semibold text-ink mb-1">Votre profil est prêt</h2>
+        <p className="text-sm text-muted max-w-xs">
+          Lancez une recherche pour trouver les offres qui correspondent à votre profil et vos préférences.
+        </p>
+      </div>
+      <div className="relative group">
+        <button
+          onClick={onLaunch}
+          disabled={launching || blocked}
+          className="btn-accent ring-focus inline-flex items-center gap-2 rounded-lg px-5 py-2.5 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {launching
+            ? <><Loader2 className="h-4 w-4 animate-spin" /> Lancement…</>
+            : <><Search className="h-4 w-4" /> Lancer une recherche</>}
+        </button>
+        {tooltip && (
+          <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 flex flex-col items-center opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-20">
+            <div
+              className="rounded-lg px-3 py-1.5 text-[11px] font-medium text-white whitespace-nowrap flex items-center gap-1.5"
+              style={{ background: "rgb(var(--ink))" }}
+            >
+              <Clock className="h-3 w-3 shrink-0" />
+              {tooltip}
+            </div>
+            <div className="w-0 h-0" style={{ borderLeft: "5px solid transparent", borderRight: "5px solid transparent", borderTop: "5px solid rgb(var(--ink))" }} />
+          </div>
+        )}
+      </div>
+      <p className="text-xs text-subtle">Durée estimée : 30–60 secondes</p>
+    </div>
+  )
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────────
+export default function DashboardPage() {
+  const navigate = useNavigate()
+
+  const queryClient = useQueryClient()
+  const { data: analysis, error: analysisError, isLoading: analysisLoading } = useLatestAnalysis()
+  const is404 = (analysisError as any)?.response?.status === 404
+
+  // Only fetch CV data when analysis returns 404 (to decide: noSearch vs redirect to onboarding)
+  const { isLoading: cvCheckLoading, isError: noCv } = useQuery({
+    queryKey: QK.cvData,
+    queryFn:  () => getCvData().then(r => r.data),
+    enabled:  is404,
+    staleTime: 5 * 60 * 1000,
+    retry:    (_, err: any) => err?.response?.status !== 404,
+  })
+
+  const noSearch  = is404 && !cvCheckLoading && !noCv
+  const loadError = !!analysisError && !is404
+
+  const [launching, setLaunching] = useState(false)
+  const [rateLimited, setRateLimited] = useState(() => {
+    const ts = localStorage.getItem(RL_KEY)
+    return ts ? Date.now() - Number(ts) < 24 * 3_600_000 : false
+  })
+  const [inProgress, setInProgress] = useState(false)
+  const [progress, setProgress]   = useState(8)
+  const [step, setStep]           = useState("Initialisation…")
+  const [filters, setFilters]     = useState<MatchFilters>(DEFAULT_FILTERS)
+
+  // Navigate to onboarding when 404 on analysis AND no CV profile exists
+  useEffect(() => {
+    if (is404 && !cvCheckLoading && noCv) navigate("/setup", { replace: true })
+  }, [is404, cvCheckLoading, noCv, navigate])
+
+  const handleLaunchSearch = async () => {
+    setLaunching(true)
+    try {
+      const res = await launchSearch()
+      queryClient.setQueryData(QK.latestAnalysis, res.data)
+    } catch (e: unknown) {
+      const status = (e as { response?: { status?: number } })?.response?.status
+      if (status === 429) {
+        localStorage.setItem(RL_KEY, String(Date.now()))
+        setRateLimited(true)
+      } else if (status === 409) {
+        setInProgress(true)
+      }
+    } finally {
+      setLaunching(false)
+    }
+  }
+
+  // SSE — only while processing
+  const isProcessing = analysis?.status === "processing" || analysis?.status === "pending"
+
+  useEffect(() => {
+    if (!analysis?.id || !isProcessing) return
+    let cancelled = false
+    const ctrl = new AbortController()
+
+    const listenSSE = async () => {
+      try {
+        const res = await fetch(`/api/analysis/${analysis.id}/stream`, {
+          credentials: "include",
+          signal: ctrl.signal,
+        })
+        if (!res.ok || !res.body) return
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        let buf = ""
+        while (!cancelled) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buf += decoder.decode(value, { stream: true })
+          const lines = buf.split("\n\n")
+          buf = lines.pop() ?? ""
+          for (const line of lines) {
+            const data = line.startsWith("data: ") ? line.slice(6) : null
+            if (!data) continue
+            try {
+              const event = JSON.parse(data)
+              if (event.node) {
+                const p = NODE_PROGRESS[event.node]
+                if (p !== undefined) setProgress(p)
+                setStep(event.label ?? event.node)
+              }
+            } catch { /* ignore */ }
+          }
+        }
+      } catch { /* aborted */ }
+    }
+
+    listenSSE()
+    return () => { cancelled = true; ctrl.abort() }
+  }, [analysis?.id, isProcessing])
+
+  // Polling — while processing
+  useEffect(() => {
+    if (!analysis?.id || !isProcessing) return
+    let timer: ReturnType<typeof setTimeout>
+    const poll = async () => {
+      try {
+        const res = await getAnalysis(analysis.id)
+        queryClient.setQueryData(QK.latestAnalysis, res.data)
+        if (res.data.status === "processing" || res.data.status === "pending") {
+          timer = setTimeout(poll, POLL_MS)
+        } else if (res.data.status === "completed") {
+          setProgress(100)
+          setStep("Terminé")
+        }
+      } catch { /* ignore polling errors */ }
+    }
+    timer = setTimeout(poll, POLL_MS)
+    return () => clearTimeout(timer)
+  }, [analysis?.id, isProcessing])
+
+  const adaptedMatches = useMemo(
+    () => (analysis?.matches ?? []).map((m, i) => adaptMatch(m, i)),
+    [analysis?.matches]
+  )
+  const visible = useMemo(() => applyFilters(adaptedMatches, filters), [adaptedMatches, filters])
+
+  if (analysisLoading || (is404 && cvCheckLoading)) {
+    return (
+      <Layout>
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
+          <MatchSkeletonList count={3} />
+        </div>
+      </Layout>
+    )
+  }
+
+  if (noSearch) {
+    return (
+      <Layout title="Tableau de bord">
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
+          <NoSearchCTA onLaunch={handleLaunchSearch} launching={launching} rateLimited={rateLimited} inProgress={inProgress} />
+        </div>
+      </Layout>
+    )
+  }
+
+  if (loadError) {
+    return (
+      <Layout>
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-16 text-center">
+          <AlertCircle className="h-10 w-10 text-red-500 mx-auto mb-4" />
+          <h2 className="text-lg font-semibold text-ink mb-2">Impossible de charger vos résultats</h2>
+          <p className="text-sm text-muted mb-6">Vérifiez votre connexion et réessayez.</p>
+          <button onClick={() => window.location.reload()}
+            className="btn-accent ring-focus inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm">
+            <RefreshCw className="h-4 w-4" /> Réessayer
+          </button>
+        </div>
+      </Layout>
+    )
+  }
+
+  if (analysis?.status === "failed") {
+    return (
+      <Layout>
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-16 text-center">
+          <AlertCircle className="h-10 w-10 text-red-500 mx-auto mb-4" />
+          <h2 className="text-lg font-semibold text-ink mb-2">L'analyse a échoué</h2>
+          <p className="text-sm text-muted mb-6">{analysis.error ?? "Une erreur inattendue s'est produite."}</p>
+          <div className="flex items-center justify-center gap-3">
+            <button
+              onClick={handleLaunchSearch}
+              disabled={launching}
+              className="btn-accent ring-focus inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {launching
+                ? <><Loader2 className="h-4 w-4 animate-spin" /> Lancement…</>
+                : <><RefreshCw className="h-4 w-4" /> Relancer la recherche</>}
+            </button>
+            <a href="/settings" className="btn-ghost ring-focus inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm">
+              Mettre à jour votre profil
+            </a>
+          </div>
+        </div>
+      </Layout>
+    )
+  }
+
+  return (
+    <Layout title="Tableau de bord" subtitle="Vos offres d'emploi correspondantes">
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
+        {isProcessing ? (
+          <ProcessingView progress={progress} step={step} />
+        ) : (
+          <div className="animate-fade-up">
+            <AnalysisHeader analysis={analysis!} />
+
+            {analysis?.keywords && analysis.keywords.length > 0 && (
+              <div className="card rounded-xl px-4 py-3 flex flex-wrap items-center gap-1.5 mb-5">
+                <span className="text-xs text-subtle mr-1">Mots-clés :</span>
+                {analysis.keywords.map((k) => (
+                  <span key={k} className="text-xs font-mono px-2 py-0.5 rounded-md bg-line/5 bd text-muted">{k}</span>
+                ))}
+              </div>
+            )}
+
+            <FilterBar filters={filters} onChange={setFilters} />
+
+            <div className="mt-5 flex items-center justify-between mb-3">
+              <p className="text-sm font-medium text-ink">
+                Correspondances <span className="text-muted font-normal">({visible.length})</span>
+              </p>
+            </div>
+
+            {visible.length === 0 ? (
+              <EmptyState onAction={() => setFilters(DEFAULT_FILTERS)} actionLabel="Réinitialiser les filtres" />
+            ) : (
+              <div className="space-y-3">
+                {visible.map((m) => (
+                  <MatchCard key={m.id} match={m}
+                    analysisId={analysis!.id}
+                    onApply={() => navigate(
+                      `/documents?analysisId=${analysis!.id}&jobIndex=${m.originalIndex}` +
+                      `&company=${encodeURIComponent(m.company)}&title=${encodeURIComponent(m.title)}`
+                    )} />
+                ))}
+              </div>
+            )}
+
+            {analysis?.final_report && (
+              <div className="mt-8 card rounded-xl overflow-hidden">
+                <div className="flex items-center gap-2.5 px-5 py-3.5 border-b border-line/10">
+                  <FileText className="h-4 w-4 text-accent" />
+                  <h3 className="text-sm font-semibold text-ink">Rapport de synthèse</h3>
+                </div>
+                <div className="px-5 py-5">
+                  <MarkdownReport markdown={analysis.final_report} />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </Layout>
+  )
+}

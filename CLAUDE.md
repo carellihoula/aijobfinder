@@ -1,7 +1,7 @@
 # AILFJ — Claude Code Project Context
 
 ## What this project is
-AI-powered CV-to-job matching API. User uploads a PDF CV → LangGraph pipeline extracts, searches, ranks jobs → returns a report + matched offers. Frontend at `../ailfj-frontend` (React + Vite + Tailwind v4).
+AI-powered CV-to-job matching API. User uploads a PDF CV → LangGraph pipeline extracts, searches, ranks jobs → returns a report + matched offers. Monorepo layout: API code in `backend/`, frontend in `ailfj-frontend/` (React + Vite + Tailwind v4), orchestrated together via the root `docker-compose.yml`.
 
 ---
 
@@ -15,7 +15,7 @@ AI-powered CV-to-job matching API. User uploads a PDF CV → LangGraph pipeline 
 - **Storage**: AWS S3 (`S3_BUCKET` + `AWS_*`) with local disk fallback
 - **Queue**: Celery + Redis (`REDIS_URL`), scheduled with Celery Beat
 - **Job providers**: JSearch (RapidAPI) + Adzuna
-- **PDF generation**: reportlab (default) or weasyprint — switch via `COVER_LETTER_BACKEND`
+- **PDF generation**: reportlab (pure Python, no system deps)
 
 ---
 
@@ -38,9 +38,9 @@ pdf_parser → cv_structurer → cortex_search
 ## The Cortex
 Centralized pgvector job index. Pre-populated by Celery crons, served to all users — no per-user API call needed.
 
-- **`app/cortex/`**: db, models, service, ingestion, enricher, seeds, router
-- **`app/cortex/seeds.py`**: 130+ seed keywords across 16 domains (ROME/ESCO-inspired)
-- **`app/cortex/esco.py`**: ESCO REST API client — NOT wired yet, run manually with `python -m app.cortex.esco`
+- **`backend/app/cortex/`**: db, models, service, ingestion, enricher, seeds, router
+- **`backend/app/cortex/seeds.py`**: 130+ seed keywords across 16 domains (ROME/ESCO-inspired)
+- **`backend/app/cortex/esco.py`**: ESCO REST API client — NOT wired yet, run manually with `python -m app.cortex.esco`
 - **Cron**: nightly at 2h (`full_ingestion`), cleanup Sundays at 3h (`cleanup_old_jobs`)
 - CV embedding query: roles + skills + level only — no user_keywords (Cortex is generalist)
 
@@ -53,15 +53,11 @@ Centralized pgvector job index. Pre-populated by Celery crons, served to all use
 
 **Agent**: LLM produces `CoverLetterContent` (fully structured JSON with sender, recipient, paragraphs with purpose labels, tone, highlighted_skills, key_selling_point). Backends only consume this object.
 
-**PDF backends** (`app/cover_letter/backends/`):
-- `reportlab_backend.py` — pure Python, no system deps
-- `weasyprint_backend.py` — HTML/CSS → PDF, needs libpango
-
-Switch: `COVER_LETTER_BACKEND=reportlab` or `weasyprint` in `.env`
+**PDF backend** (`backend/app/cover_letter/backends/reportlab_backend.py`) — pure Python, no system deps.
 
 ---
 
-## Storage abstraction (`app/storage.py`)
+## Storage abstraction (`backend/app/storage.py`)
 - `S3_BUCKET` set → AWS S3 (`put_object`, presigned URLs)
 - `S3_BUCKET` empty → local `UPLOAD_DIR/` fallback
 - CV key format: `cvs/{user_id}/{cv_id}.pdf`
@@ -81,7 +77,11 @@ Switch: `COVER_LETTER_BACKEND=reportlab` or `weasyprint` in `.env`
 
 ## Running locally
 
+All commands below run from `backend/`.
+
 ```bash
+cd backend
+
 # API
 uvicorn app.main:app --reload
 
@@ -98,6 +98,8 @@ celery -A app.worker.celery_app flower --port=5555
 python -m app.cortex.esco
 ```
 
+Or via Docker Compose from the repo root (`docker-compose.yml`): `docker compose up --build -d` starts `frontend`, `api`, `celery-worker`, `celery-beat`, `flower`, and `redis` together.
+
 ## Database
 - `DATABASE_URL` must use `postgresql+asyncpg://` (not psycopg2, not plain postgresql://)
 - Port `5432` for direct connection (Supabase pooler on 6543 is incompatible with asyncpg prepared statements)
@@ -106,7 +108,7 @@ python -m app.cortex.esco
 
 ---
 
-## Frontend (`../ailfj-frontend`)
+## Frontend (`ailfj-frontend/`)
 React 19 + Vite + Tailwind v4 + React Query + React Router v7.
 
 Key files:
@@ -132,6 +134,6 @@ Apply flow: click "Postuler" on MatchCard → `ApplyModal` opens → fetches cov
 ---
 
 ## Files NOT to touch without care
-- `app/pipeline/graph.py` — full graph wiring, conditional edges
-- `app/cortex/db.py` — graceful disable if `CORTEX_DATABASE_URL` not set
-- `app/storage.py` — single place to swap S3 ↔ local; keep interface stable (`save_cv`, `read_file`, `get_presigned_url`, `delete_file`)
+- `backend/app/pipeline/graph.py` — full graph wiring, conditional edges
+- `backend/app/cortex/db.py` — graceful disable if `CORTEX_DATABASE_URL` not set
+- `backend/app/storage.py` — single place to swap S3 ↔ local; keep interface stable (`save_cv`, `read_file`, `get_presigned_url`, `delete_file`)

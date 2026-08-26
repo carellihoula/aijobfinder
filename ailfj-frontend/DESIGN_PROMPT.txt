@@ -1,0 +1,387 @@
+==============================================================================
+  AILFJ — FRONTEND REDESIGN BRIEF
+  For: Claude (design-focused session)
+  Stack: React 19 + Vite + Tailwind v4 + Lucide React + React Router v7
+==============================================================================
+
+MISSION
+-------
+Redesign the AILFJ frontend. The app matches CVs to job offers using an AI
+pipeline. The current code is functional and has a decent dark-mode design
+system, but several pages are visually broken or inconsistent, and the overall
+experience lacks polish and personality. The goal is a cohesive, premium
+product feel — think Linear, Vercel, or Raycast.
+
+No new features. No new API calls. No logic changes. Pure visual/UX overhaul.
+Keep all existing component names, props, and HTML structure roughly intact
+so the app keeps working.
+
+
+REPOSITORY LAYOUT (relative to project root)
+---------------------------------------------
+src/
+  index.css              — design tokens and base styles (CSS custom properties)
+  pages/
+    LoginPage.tsx
+    RegisterPage.tsx
+    UploadPage.tsx
+    AnalysisPage.tsx
+  components/
+    Navbar.tsx
+    Dropzone.tsx
+    KeywordInput.tsx
+    MatchCard.tsx
+    MatchCard's ScoreBar.tsx (inlined or separate)
+    FilterBar.tsx
+    StatusHeader.tsx
+    MarkdownReport.tsx
+    ApplyModal.tsx
+    Skeletons.tsx
+    ThemeToggle.tsx
+    states/ErrorState.tsx
+    states/EmptyState.tsx
+
+
+==============================================================================
+  CURRENT DESIGN SYSTEM (index.css) — DO NOT CHANGE THE TOKEN NAMES
+==============================================================================
+
+CSS custom properties (defined in :root / .dark):
+
+  --bg        background canvas
+  --card      card surface
+  --well      slightly deeper surface (inputs, panels)
+  --line      border color base (used with opacity: rgb(var(--line) / 0.10))
+  --ink       primary text
+  --muted     secondary text
+  --subtle    tertiary / placeholder text
+  --accent    primary accent (purple: 124,58,237 light / 139,92,246 dark)
+  --shadow    box-shadow token
+
+CSS utility classes (keep these working):
+  .bd          — 1px border using --line with opacity
+  .card        — card surface + border + shadow
+  .btn-accent  — gradient purple CTA button with glow
+  .btn-ghost   — ghost button with border
+  .glass       — frosted glass (navbar)
+  .text-grad   — gradient text (ink → muted)
+  .app-bg      — page background + radial gradient halo
+  .seg-on      — active pill/segment state
+  .ring-focus  — accessible focus ring
+  .skel        — skeleton shimmer base
+  .exp         — animated expand/collapse (max-height transition)
+  .clamp-2     — two-line clamp
+  .no-scrollbar — hide scrollbar
+  .pulse-dot   — pulsing status dot
+
+Font: Geist (sans) + Geist Mono (mono)
+
+Accent color family available as Tailwind colors:
+  accent-300 (#c4b5fd) accent-400 (#a78bfa) accent-500 (#8b5cf6)
+  accent-600 (#7c3aed) accent-700 (#6d28d9)
+
+Animations defined:
+  animate-shimmer      (skeleton shimmer)
+  animate-spin-slow    (slow spinner, used in StatusHeader)
+  animate-fade-up      (modal entrance / hero)
+  animate-pop-in       (spring pop)
+
+
+==============================================================================
+  CRITICAL BUG #1 — LOGIN & REGISTER PAGES DON'T USE THE DESIGN SYSTEM
+==============================================================================
+
+LoginPage.tsx and RegisterPage.tsx were never migrated to the CSS var system.
+They use raw Tailwind gray/violet classes that clash completely with the rest
+of the app (especially in light mode, which has a white/zinc canvas, not
+gray-950).
+
+Current broken code pattern:
+  className="min-h-screen bg-gray-950 ..."        ← hardcoded dark only
+  className="bg-gray-900 border border-gray-800"  ← ignores design system
+  className="bg-gray-800 border border-gray-700"  ← inputs look wrong in light
+  className="bg-violet-600 hover:bg-violet-500"   ← not using btn-accent
+
+WHAT TO DO:
+  - Replace every hardcoded gray-* and violet-* class with design system classes.
+  - Use `app-bg` as page background (gives the purple radial glow like UploadPage).
+  - Use `card` for the form container.
+  - Use `bg-well border border-line/10` for inputs (matching UploadPage inputs).
+  - Use `text-ink`, `text-muted`, `text-subtle` for text hierarchy.
+  - Use `btn-accent` for the submit button.
+  - Keep the BrainCircuit icon + brand name at the top.
+  - Add a dark mode class for autofill input colors (WebKit autofill is white).
+
+Make the login page feel like it belongs to the same product as UploadPage.
+
+
+==============================================================================
+  CRITICAL BUG #2 — APPLY MODAL HEADER MISSING ACTIONS / VISUAL HIERARCHY
+==============================================================================
+
+The apply modal (ApplyModal.tsx) is good structurally. But:
+- The "Postuler sur le site" CTA in the footer is hard to notice on mobile.
+- The two-panel layout (CV + cover letter) collapses to a vertical stack on
+  mobile — consider making the panels swipeable tabs on small screens.
+- The cover letter loading state (Loader2 spinner) could be more branded.
+
+
+==============================================================================
+  DESIGN IMPROVEMENT AREAS (in priority order)
+==============================================================================
+
+--- 1. LOGIN / REGISTER (critical, see above) ---
+Already described. Full redesign using design system. No new features.
+
+--- 2. NAVBAR ---
+Current: glass navbar with BrainCircuit icon, "AI Job Finder" brand name,
+ThemeToggle, "+ Nouvelle analyse" button, LogOut button.
+
+Improvements:
+- Consider a more distinctive brand mark — the BrainCircuit icon in a small
+  rounded square with accent background is okay, but the brand name
+  "AI Job Finder" is very generic. You may rename it visually to "AILFJ"
+  or "JobMatch AI" or keep it — but give it more weight.
+- "Nouvelle analyse" CTA: already uses btn-accent. Consider adding a subtle
+  keyboard shortcut hint (⌘N) in the button on desktop.
+- The logout button is just an icon — add a tooltip on hover saying "Déconnexion".
+- On mobile the CTA collapses to a + icon; keep that behavior.
+
+--- 3. UPLOAD PAGE — HERO SECTION ---
+Current: small badge ("Nouvelle analyse"), h1 ("Trouvons votre prochain poste."),
+subtitle, then immediately the form. The hero is understated.
+
+Improvements:
+- Make the h1 larger and more impactful (the text-grad class creates the nice
+  gradient; use it well).
+- Add a row of 3 small feature callouts below the subtitle — e.g.:
+    ✦ Analyse sémantique · ✦ Matching IA · ✦ Lettre générée automatiquement
+  Use small mono text with accent dots, inline, horizontal, no additional height.
+- The dropzone (Dropzone.tsx) should feel more alive when a file is hovered over
+  or dropped — make sure the drag-over state has a visible accent border + subtle
+  background glow. (Check Dropzone.tsx for onDragOver class toggling.)
+
+--- 4. MATCH CARDS ---
+Current: each card shows:
+  - A letter-initial avatar (e.g. "A" for Acme) in a neutral square.
+  - Title + company + location
+  - Score (e.g. "7.8/10 FORT") colored by tier (emerald/yellow/rose)
+  - Tags (contract, mode, seniority) as small pills
+  - A score bar (ScoreBar component)
+  - Reason text (italic) + short description (2-line clamp)
+  - Expand section: full description, missions list, matched/missing skills, action buttons
+
+Improvements:
+- Company avatar: instead of a plain neutral square, generate a consistent
+  gradient background per company (hash the company name to pick from 6-8
+  gradient presets — e.g. purple→blue, emerald→teal, orange→amber, etc.)
+  Keep the letter initial, just make it more colorful.
+  Example presets (use inline style):
+    0: "linear-gradient(135deg, #7c3aed, #4f46e5)"  // violet-indigo
+    1: "linear-gradient(135deg, #059669, #0891b2)"  // emerald-cyan
+    2: "linear-gradient(135deg, #d97706, #dc2626)"  // amber-red
+    3: "linear-gradient(135deg, #db2777, #9333ea)"  // pink-purple
+    4: "linear-gradient(135deg, #0284c7, #2563eb)"  // sky-blue
+    5: "linear-gradient(135deg, #65a30d, #0d9488)"  // lime-teal
+  Use: `GRADIENTS[hashStringToIndex(company, GRADIENTS.length)]`
+  where hashStringToIndex sums char codes mod length.
+
+- Score display: the current "7.8/10" with "FORT" below is fine. Make the
+  score number bigger or add a small arc gauge (SVG) behind it like StatusHeader
+  uses for the spinner.
+
+- Expand animation: already uses max-height trick (.exp class). Keep it.
+
+- "Postuler" button: currently small, inline. Make it slightly more prominent
+  (it's the primary action). Consider a full-width button inside the expanded
+  section on mobile.
+
+--- 5. ANALYSIS PAGE — PROCESSING STATE ---
+Current: StatusHeader shows spinner + step label + % + progress bar.
+Below it: MatchSkeletonList (3 skeleton cards).
+
+Improvements:
+- The transition between steps could show the step name with a subtle fade
+  in/out animation (the step label changes but there's no micro-animation).
+  Add `key={currentStep}` on the step text element so React mounts/unmounts it
+  — then add a CSS fade-in (animate-fade-up or a simple opacity transition).
+
+- The skeleton cards are functional. Consider adding a subtle label above them:
+  "Les résultats apparaîtront ici" in tiny subtle text.
+
+- The progress bar gradient (accent → accent/70%) could extend to a slightly
+  different hue at the end to feel more alive.
+
+--- 6. ANALYSIS PAGE — COMPLETED STATE ---
+Current: StatusHeader (green check, "Analyse terminée", N offres, M matches),
+keywords row, FilterBar, "Correspondances (N)" heading, match cards list,
+report section.
+
+Improvements:
+- StatusHeader completed: the green glow on the right exists already. Maybe add
+  a very subtle confetti/sparkle effect (CSS only, 2-3 small accent-colored dots
+  that animate away) on first mount when analysis completes.
+
+- Keywords row: nice already. Keep it.
+
+- FilterBar: the `<select>` element for sort is a raw browser select —
+  it looks out of place. Replace with a styled custom select or a group of
+  3 pills (Score | Récence | Salaire) matching the other pill groups.
+
+- The "Rapport de synthèse" card at the bottom: the header bar with FileText
+  icon is good. The markdown content inside (MarkdownReport) should have proper
+  typography — headings, bold, lists should all look styled (not browser default).
+  Check MarkdownReport.tsx for current styling.
+
+--- 7. FILTER BAR ---
+The sort `<select>` element is the biggest visual inconsistency. Replace it
+with a styled pill group. No new state needed — same `filters.sort` values:
+  "score" | "recent" | "salary"
+Labels: "Score" | "Récence" | "Salaire"
+
+--- 8. OVERALL MICRO-POLISH ---
+- All form inputs should have consistent focus rings (ring-focus class is defined).
+  Make sure it's applied everywhere.
+- Button active states: btn-accent has `translateY(1px)` on active — nice.
+  btn-ghost should get the same.
+- Error messages (red text) should use a small alert icon + consistent styling.
+- Page transitions: React Router doesn't add transitions by default — consider
+  wrapping page content in a div with `animate-fade-up` for entry animations.
+
+
+==============================================================================
+  WHAT NOT TO CHANGE
+==============================================================================
+
+- CSS custom property names and values in index.css (--bg, --card, etc.)
+- Any TypeScript types, interfaces, or prop signatures
+- Any API calls or fetch logic
+- Any routing logic
+- The SSE streaming logic in AnalysisPage.tsx
+- The ApplyModal PDF iframe display logic
+- The Dropzone drag-and-drop behavior
+- The MatchCard expand/collapse animation logic (.exp class)
+- The StatusHeader SSE progress binding (NODE_PROGRESS map, setProgress, setCurrentStep)
+- The Celery/LangGraph/FastAPI backend — pure frontend changes only
+
+
+==============================================================================
+  VISUAL REFERENCE / AESTHETIC TARGET
+==============================================================================
+
+Aim for: Linear.app + Vercel Dashboard + Raycast
+
+Characteristics:
+- Dense but breathable — information-rich without feeling crowded
+- Sharp typography hierarchy — clear distinction between h1, body, captions
+- Purposeful color — accent purple used sparingly and intentionally
+- Dark mode as the premium experience, light mode equally polished
+- Subtle gradients and glows — not flat, not garish
+- Animations that feel physical and fast — 200-400ms, ease curves (not linear)
+- Monospace for numbers, percentages, scores (Geist Mono already set up)
+
+What to avoid:
+- Neon overload — accent on every element
+- Huge hero images or illustrations
+- Slow/bouncy animations
+- Any page that uses hardcoded Tailwind gray-* (use CSS vars instead)
+
+
+==============================================================================
+  APPENDIX: COMPONENT INVENTORY
+==============================================================================
+
+LoginPage.tsx
+  State: email, password, loading, error
+  Auth: useAuth hook (loginUser) → navigate("/") on success
+  PROBLEM: uses gray-950/gray-900 hardcoded — needs full redesign
+
+RegisterPage.tsx
+  State: email, password, fullName, loading, error
+  Auth: useAuth hook (registerUser)
+  PROBLEM: same as LoginPage
+
+UploadPage.tsx
+  State: file, keywords[], filters (SearchFilters), locInput, filtersOpen, loading, error
+  Upload: uploadCV(file, keywords, filters) → navigate("/analysis/{id}")
+  Components: Navbar, Dropzone, KeywordInput, collapsible filter section (Pill buttons)
+
+AnalysisPage.tsx
+  State: analysis, apiError, progress (0-100), currentStep, filters, applyMatch
+  SSE: fetch /api/analysis/{id}/stream, maps node name → NODE_PROGRESS %
+  Polling: GET /api/analysis/{id} every 3s while processing
+  Components: Navbar, StatusHeader, MatchSkeletonList, MatchCard×N, FilterBar,
+              MarkdownReport, ApplyModal (modal, conditionally rendered)
+
+Navbar.tsx
+  Props: onLogout?
+  Links: "/" (home), navigate("/") for new analysis
+
+StatusHeader.tsx
+  Props: status, progress, step, jobsEvaluated, strongMatches, finishedAt, onExport
+  Renders: processing spinner+bar OR completed green header OR null
+
+MatchCard.tsx
+  Props: match (DesignJobMatch), onApply?
+  Self-contained expand/collapse with animation
+  DesignJobMatch fields: id, originalIndex, title, company, logo (first letter),
+    location, mode, contract, seniority, score (0-10), posted, postedDays,
+    reason, description, missions[], matchedSkills[], missingSkills[], url?
+
+FilterBar.tsx
+  Props: filters (MatchFilters), onChange
+  Filters: contract, mode, minScore, sort
+  PROBLEM: sort uses raw <select> — should be pills
+
+ApplyModal.tsx
+  Props: analysisId, match, onClose
+  Fetches cover letter PDF on mount
+  Shows: CV iframe (left) + cover letter iframe (right) in a full-screen modal
+  Footer: "Postuler sur le site" CTA linking to match.url
+
+ScoreBar.tsx
+  Shows a thin colored progress bar for the match score (0-10)
+
+MarkdownReport.tsx
+  Renders the AI-generated final_report as formatted markdown
+
+Skeletons.tsx
+  MatchSkeletonList — animated skeleton placeholder for cards during loading
+
+ThemeToggle.tsx
+  Toggles .dark class on <html>
+
+states/ErrorState.tsx
+  Full-page error display with retry button
+
+states/EmptyState.tsx
+  Empty state for filtered-out matches with "reset filters" action
+
+Dropzone.tsx
+  Drag-and-drop + click-to-browse zone for PDF files
+  Shows filename when file selected
+
+KeywordInput.tsx
+  Tag input for job keywords (up to 10)
+
+
+==============================================================================
+  DELIVERABLE
+==============================================================================
+
+For each file you modify, show the full updated file content (not just a diff).
+Files that definitely need changes:
+  - LoginPage.tsx          (critical — wrong design system)
+  - RegisterPage.tsx       (critical — wrong design system)
+  - FilterBar.tsx          (replace <select> with pills)
+  - MatchCard.tsx          (gradient company avatars)
+  - StatusHeader.tsx       (step label animation, polished processing state)
+
+Files that may need minor changes:
+  - index.css              (only if adding new keyframes/utilities)
+  - UploadPage.tsx         (hero improvements, feature callouts)
+  - AnalysisPage.tsx       (animate-fade-up on step label)
+  - Navbar.tsx             (brand polish, logout tooltip)
+
+Start with the critical files (Login, Register) since they are the most broken.
+==============================================================================

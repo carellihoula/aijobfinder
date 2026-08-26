@@ -68,7 +68,10 @@ reportlab_*
 presigned.txt
 celery.txt
 i.txt
+temp.md
 cortex.md
+ARCHITECTURE.md
+ARCHITECTURE.txt
 # Terraform / infra (if added later)
 *.tfstate
 *.tfstate.backup

@@ -1,0 +1,74 @@
+services:
+  frontend:
+    build: ./ailfj-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  api:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - backend/.env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - redis
+    volumes:
+      - ./backend/uploads:/app/uploads
+    restart: unless-stopped
+
+  celery-worker:
+    build: ./backend
+    command: celery -A app.worker.celery_app worker --loglevel=info
+    env_file:
+      - backend/.env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - redis
+    volumes:
+      - ./backend/uploads:/app/uploads
+    restart: unless-stopped
+
+  celery-beat:
+    build: ./backend
+    command: celery -A app.worker.celery_app beat --loglevel=info
+    env_file:
+      - backend/.env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  flower:
+    build: ./backend
+    command: celery -A app.worker.celery_app flower --port=5555 --basic_auth=${FLOWER_BASIC_AUTH}
+    env_file:
+      - backend/.env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      # Bound to localhost only — never expose Flower directly to the internet
+      # (it shows task args/results, which can include user data). Reach it via
+      # SSH tunnel, or put a TLS reverse proxy in front if remote access is needed.
+      - "127.0.0.1:5555:5555"
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  redis_data:
