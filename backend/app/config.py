@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 
     # Comma-separated list of allowed CORS origins, e.g. "http://localhost:5173,https://myapp.com"
+    ALLOWED_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
 
     # Comma-separated list of admin emails that can access /cortex/ingest and /cortex/jobs/cleanup
     # Leave empty to allow ALL authenticated users (only safe in dev/local setups)
