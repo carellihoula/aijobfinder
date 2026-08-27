@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { FileText, RefreshCw, AlertCircle, Search, Loader2, Clock, ChevronDown } from "lucide-react"
+import { FileText, RefreshCw, AlertCircle, Search, Loader2, Clock, ChevronDown, Plus, Radar } from "lucide-react"
 import { getAnalysis, getCvData, launchSearch } from "../api/analysis"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { QK, useLatestAnalysis } from "../lib/queries"
@@ -335,6 +335,11 @@ export default function DashboardPage() {
     [visible, page]
   )
 
+  const rlHoursLeft = (() => {
+    const ts = localStorage.getItem(RL_KEY)
+    return ts ? Math.max(1, Math.ceil((24 * 3_600_000 - (Date.now() - Number(ts))) / 3_600_000)) : 24
+  })()
+
   if (analysisLoading || (is404 && cvCheckLoading)) {
     return (
       <Layout>
@@ -398,7 +403,55 @@ export default function DashboardPage() {
   }
 
   return (
-    <Layout title="Tableau de bord" subtitle="Vos offres d'emploi correspondantes">
+    <Layout
+      title="Tableau de bord"
+      subtitle="Vos offres d'emploi correspondantes"
+      actions={
+        <>
+          <div className="relative group">
+            <button
+              onClick={handleLaunchSearch}
+              disabled={launching || inProgress || rateLimited || isProcessing}
+              className="relative btn-accent ring-focus rounded-xl px-4 py-2.5 text-[13px] font-semibold flex items-center gap-2 shadow-[0_4px_18px_-2px_rgba(5,150,105,0.55)] hover:shadow-[0_6px_22px_-2px_rgba(5,150,105,0.7)] hover:-translate-y-0.5 transition disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none disabled:translate-y-0"
+            >
+              {launching ? (
+                <><Loader2 className="h-4 w-4 animate-spin" /> Recherche…</>
+              ) : (
+                <>
+                  <span className="relative flex h-4 w-4 items-center justify-center shrink-0">
+                    {!(inProgress || rateLimited || isProcessing) && (
+                      <span className="absolute inline-flex h-full w-full rounded-full bg-white/40 animate-ping" />
+                    )}
+                    <Radar className="relative h-4 w-4" />
+                  </span>
+                  Trouver mes offres
+                </>
+              )}
+            </button>
+
+            {(rateLimited || inProgress) && (
+              <div className="pointer-events-none absolute top-full left-1/2 -translate-x-1/2 mt-2 flex flex-col items-center opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-20">
+                <div className="w-0 h-0" style={{ borderLeft: "5px solid transparent", borderRight: "5px solid transparent", borderBottom: "5px solid rgb(var(--ink))" }} />
+                <div
+                  className="rounded-lg px-3 py-2 text-[11px] font-medium text-white whitespace-nowrap flex items-center gap-1.5"
+                  style={{ background: "rgb(var(--ink))" }}
+                >
+                  <Clock className="h-3 w-3 shrink-0" />
+                  {rateLimited ? `Prochaine recherche possible dans ${rlHoursLeft}h` : "Une recherche est déjà en cours"}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={() => navigate("/applications?new=1")}
+            className="btn-accent ring-focus rounded-lg px-3 py-1.5 text-[12px] font-medium flex items-center gap-1.5"
+          >
+            <Plus className="h-3.5 w-3.5" /> Nouvelle candidature
+          </button>
+        </>
+      }
+    >
       <div className={`mx-auto px-4 sm:px-6 py-8 ${isProcessing ? "max-w-3xl" : "max-w-[1600px]"}`}>
         {isProcessing ? (
           <ProcessingView progress={progress} step={step} />

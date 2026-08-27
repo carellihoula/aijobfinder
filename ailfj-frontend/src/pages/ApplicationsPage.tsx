@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
-import { Link } from "react-router-dom"
+import { Link, useSearchParams } from "react-router-dom"
 import {
   Briefcase, Plus, Link2, ClipboardPaste, Loader2, X,
   Trash2, ExternalLink, Download, RefreshCw, Sparkles, AlertCircle,
@@ -354,8 +354,19 @@ function CoverLetterCell({ application }: { application: Application }) {
 export default function ApplicationsPage() {
   const { data: applications = [], isLoading, refetch } = useApplications()
   const queryClient = useQueryClient()
-  const [showAdd, setShowAdd] = useState(false)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [showAdd, setShowAdd] = useState(() => searchParams.get("new") === "1")
   const [busyId, setBusyId] = useState<string | null>(null)
+
+  // Deep-link support (e.g. from the dashboard "Nouvelle candidature" shortcut)
+  useEffect(() => {
+    if (searchParams.get("new") === "1") {
+      setShowAdd(true)
+      searchParams.delete("new")
+      setSearchParams(searchParams, { replace: true })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: QK.applications })
 
