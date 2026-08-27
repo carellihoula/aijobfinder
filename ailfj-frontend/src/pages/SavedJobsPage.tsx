@@ -1,22 +1,10 @@
 import { useState, useCallback } from "react"
 import { useNavigate } from "react-router-dom"
-import { Bookmark, BookmarkX, Search, Inbox } from "lucide-react"
+import { Bookmark, Search, Inbox, X } from "lucide-react"
 import Layout from "../components/Layout"
 import MatchCard, { MatchDetailModal } from "../components/MatchCard"
 import { getSavedJobs, unsaveJob } from "../lib/savedJobs"
 import type { SavedJob } from "../lib/savedJobs"
-
-function formatSaved(iso: string) {
-  try {
-    const d = new Date(iso)
-    const diff = Math.floor((Date.now() - d.getTime()) / 86400000)
-    if (diff === 0) return "Aujourd'hui"
-    if (diff === 1) return "Hier"
-    return `Il y a ${diff} jours`
-  } catch {
-    return ""
-  }
-}
 
 export default function SavedJobsPage() {
   const navigate = useNavigate()
@@ -41,7 +29,7 @@ export default function SavedJobsPage() {
       title="Offres sauvegardées"
       subtitle={`${jobs.length} offre${jobs.length !== 1 ? "s" : ""} conservée${jobs.length !== 1 ? "s" : ""}`}
     >
-      <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-8">
+      <div className="max-w-400 mx-auto px-4 sm:px-6 py-8">
 
         {jobs.length > 0 && (
           <div className="relative mb-6">
@@ -79,19 +67,13 @@ export default function SavedJobsPage() {
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {filtered.map((job) => (
               <div key={job.id} className="relative group">
-                {/* Saved date badge */}
-                <div className="absolute top-4 right-4 z-10 flex items-center gap-1.5">
-                  <span className="text-[10px] text-subtle bg-[rgb(var(--bg))] bd rounded-md px-2 py-0.5">
-                    Sauvegardé · {formatSaved(job.savedAt)}
-                  </span>
-                  <button
-                    onClick={() => handleUnsave(job.id)}
-                    title="Retirer"
-                    className="h-6 w-6 rounded-md flex items-center justify-center text-subtle hover:text-red-500 hover:bg-red-500/10 transition opacity-0 group-hover:opacity-100"
-                  >
-                    <BookmarkX className="h-3.5 w-3.5" />
-                  </button>
-                </div>
+                <button
+                  onClick={() => handleUnsave(job.id)}
+                  title="Retirer"
+                  className="absolute -top-2 -right-2 z-10 h-6 w-6 rounded-full flex items-center justify-center text-subtle bg-[rgb(var(--bg))] bd shadow-md hover:text-red-500 hover:bg-red-500/10 transition"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
                 <MatchCard match={job} onOpen={() => setSelected(job)} />
               </div>
             ))}

@@ -452,7 +452,7 @@ export default function DashboardPage() {
         </>
       }
     >
-      <div className={`mx-auto px-4 sm:px-6 py-8 ${isProcessing ? "max-w-3xl" : "max-w-[1600px]"}`}>
+      <div className={`mx-auto px-4 sm:px-6 py-8 ${isProcessing ? "max-w-3xl" : "max-w-400"}`}>
         {isProcessing ? (
           <ProcessingView progress={progress} step={step} />
         ) : (
