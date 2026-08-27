@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { FileText, RefreshCw, AlertCircle, Search, Loader2, Clock } from "lucide-react"
+import { FileText, RefreshCw, AlertCircle, Search, Loader2, Clock, ChevronDown } from "lucide-react"
 import { getAnalysis, getCvData, launchSearch } from "../api/analysis"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { QK, useLatestAnalysis } from "../lib/queries"
@@ -8,9 +8,10 @@ import type { Analysis, JobMatch as BackendJobMatch } from "../types"
 import Layout from "../components/Layout"
 import { MatchSkeletonList } from "../components/Skeletons"
 
-import MatchCard from "../components/MatchCard"
+import MatchCard, { MatchDetailModal } from "../components/MatchCard"
 import MarkdownReport from "../components/MarkdownReport"
 import FilterBar from "../components/FilterBar"
+import Pagination from "../components/Pagination"
 import EmptyState from "../components/states/EmptyState"
 import {
   DEFAULT_FILTERS,
@@ -229,6 +230,9 @@ export default function DashboardPage() {
   const [progress, setProgress]   = useState(8)
   const [step, setStep]           = useState("Initialisation…")
   const [filters, setFilters]     = useState<MatchFilters>(DEFAULT_FILTERS)
+  const [page, setPage]           = useState(1)
+  const [selected, setSelected]   = useState<DesignJobMatch | null>(null)
+  const [reportOpen, setReportOpen] = useState(false)
 
   // Navigate to onboarding when 404 on analysis AND no CV profile exists
   useEffect(() => {
@@ -323,6 +327,14 @@ export default function DashboardPage() {
   )
   const visible = useMemo(() => applyFilters(adaptedMatches, filters), [adaptedMatches, filters])
 
+  const PAGE_SIZE = 12
+  const pageCount = Math.max(1, Math.ceil(visible.length / PAGE_SIZE))
+  useEffect(() => { setPage(1) }, [filters, analysis?.id])
+  const pageItems = useMemo(
+    () => visible.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [visible, page]
+  )
+
   if (analysisLoading || (is404 && cvCheckLoading)) {
     return (
       <Layout>
@@ -387,7 +399,7 @@ export default function DashboardPage() {
 
   return (
     <Layout title="Tableau de bord" subtitle="Vos offres d'emploi correspondantes">
-      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
+      <div className={`mx-auto px-4 sm:px-6 py-8 ${isProcessing ? "max-w-3xl" : "max-w-[1600px]"}`}>
         {isProcessing ? (
           <ProcessingView progress={progress} step={step} />
         ) : (
@@ -414,27 +426,45 @@ export default function DashboardPage() {
             {visible.length === 0 ? (
               <EmptyState onAction={() => setFilters(DEFAULT_FILTERS)} actionLabel="Réinitialiser les filtres" />
             ) : (
-              <div className="space-y-3">
-                {visible.map((m) => (
-                  <MatchCard key={m.id} match={m}
-                    analysisId={analysis!.id}
-                    onApply={() => navigate(
-                      `/documents?analysisId=${analysis!.id}&jobIndex=${m.originalIndex}` +
-                      `&company=${encodeURIComponent(m.company)}&title=${encodeURIComponent(m.title)}`
-                    )} />
-                ))}
-              </div>
+              <>
+                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {pageItems.map((m) => (
+                    <MatchCard key={m.id} match={m} onOpen={() => setSelected(m)} />
+                  ))}
+                </div>
+                <Pagination page={page} pageCount={pageCount} onChange={setPage} />
+              </>
+            )}
+
+            {selected && (
+              <MatchDetailModal
+                match={selected}
+                analysisId={analysis!.id}
+                onClose={() => setSelected(null)}
+                onApply={() => navigate(
+                  `/documents?analysisId=${analysis!.id}&jobIndex=${selected.originalIndex}` +
+                  `&company=${encodeURIComponent(selected.company)}&title=${encodeURIComponent(selected.title)}`
+                )}
+                onSaveToggle={() => setSelected({ ...selected })}
+              />
             )}
 
             {analysis?.final_report && (
               <div className="mt-8 card rounded-xl overflow-hidden">
-                <div className="flex items-center gap-2.5 px-5 py-3.5 border-b border-line/10">
+                <button
+                  onClick={() => setReportOpen((v) => !v)}
+                  aria-expanded={reportOpen}
+                  className={`w-full flex items-center gap-2.5 px-5 py-3.5 text-left ${reportOpen ? "border-b border-line/10" : ""}`}
+                >
                   <FileText className="h-4 w-4 text-accent" />
-                  <h3 className="text-sm font-semibold text-ink">Rapport de synthèse</h3>
-                </div>
-                <div className="px-5 py-5">
-                  <MarkdownReport markdown={analysis.final_report} />
-                </div>
+                  <h3 className="text-sm font-semibold text-ink flex-1">Rapport de synthèse</h3>
+                  <ChevronDown className={`h-4 w-4 text-subtle transition-transform ${reportOpen ? "rotate-180" : ""}`} />
+                </button>
+                {reportOpen && (
+                  <div className="px-5 py-5">
+                    <MarkdownReport markdown={analysis.final_report} />
+                  </div>
+                )}
               </div>
             )}
           </div>

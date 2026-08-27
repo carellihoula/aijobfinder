@@ -2,7 +2,7 @@ import { useState, useCallback } from "react"
 import { useNavigate } from "react-router-dom"
 import { Bookmark, BookmarkX, Search, Inbox } from "lucide-react"
 import Layout from "../components/Layout"
-import MatchCard from "../components/MatchCard"
+import MatchCard, { MatchDetailModal } from "../components/MatchCard"
 import { getSavedJobs, unsaveJob } from "../lib/savedJobs"
 import type { SavedJob } from "../lib/savedJobs"
 
@@ -22,6 +22,7 @@ export default function SavedJobsPage() {
   const navigate = useNavigate()
   const [jobs, setJobs] = useState<SavedJob[]>(() => getSavedJobs())
   const [query, setQuery] = useState("")
+  const [selected, setSelected] = useState<SavedJob | null>(null)
 
   const handleUnsave = useCallback((jobId: string) => {
     unsaveJob(jobId)
@@ -40,7 +41,7 @@ export default function SavedJobsPage() {
       title="Offres sauvegardées"
       subtitle={`${jobs.length} offre${jobs.length !== 1 ? "s" : ""} conservée${jobs.length !== 1 ? "s" : ""}`}
     >
-      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
+      <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-8">
 
         {jobs.length > 0 && (
           <div className="relative mb-6">
@@ -75,7 +76,7 @@ export default function SavedJobsPage() {
         ) : filtered.length === 0 ? (
           <p className="text-center text-sm text-muted py-12">Aucun résultat pour « {query} »</p>
         ) : (
-          <div className="space-y-3">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {filtered.map((job) => (
               <div key={job.id} className="relative group">
                 {/* Saved date badge */}
@@ -91,18 +92,23 @@ export default function SavedJobsPage() {
                     <BookmarkX className="h-3.5 w-3.5" />
                   </button>
                 </div>
-                <MatchCard
-                  match={job}
-                  analysisId={job.analysisId}
-                  onApply={() => navigate(
-                    `/documents?analysisId=${job.analysisId}&jobIndex=${job.originalIndex}` +
-                    `&company=${encodeURIComponent(job.company)}&title=${encodeURIComponent(job.title)}`
-                  )}
-                  onSaveToggle={() => handleUnsave(job.id)}
-                />
+                <MatchCard match={job} onOpen={() => setSelected(job)} />
               </div>
             ))}
           </div>
+        )}
+
+        {selected && (
+          <MatchDetailModal
+            match={selected}
+            analysisId={selected.analysisId}
+            onClose={() => setSelected(null)}
+            onApply={() => navigate(
+              `/documents?analysisId=${selected.analysisId}&jobIndex=${selected.originalIndex}` +
+              `&company=${encodeURIComponent(selected.company)}&title=${encodeURIComponent(selected.title)}`
+            )}
+            onSaveToggle={() => { handleUnsave(selected.id); setSelected(null) }}
+          />
         )}
       </div>
     </Layout>
