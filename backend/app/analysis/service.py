@@ -50,7 +50,7 @@ async def get_latest_analysis_for_user(db: AsyncSession, user_id: UUID) -> Analy
     return result.scalar_one_or_none()
 
 
-async def fail_stale_analyses(db: AsyncSession, older_than_minutes: int = 30) -> int:
+async def fail_stale_analyses(db: AsyncSession, older_than_minutes: int = 30) -> list[UUID]:
     """
     Mark analyses stuck in "processing" as failed.
 
@@ -58,6 +58,8 @@ async def fail_stale_analyses(db: AsyncSession, older_than_minutes: int = 30) ->
     task. If the worker is killed mid-task (host reboot, OOM, broker state lost),
     the row is orphaned in "processing" forever and blocks the user from
     launching a new search. Scheduled periodically to reconcile these.
+
+    Returns the user_ids affected, so the caller can notify them.
     """
     from datetime import timedelta, timezone as tz
 
@@ -66,9 +68,10 @@ async def fail_stale_analyses(db: AsyncSession, older_than_minutes: int = 30) ->
         update(Analysis)
         .where(Analysis.status == "processing", Analysis.updated_at < cutoff)
         .values(status="failed", error="Pipeline interrupted (worker restarted before completion) - please retry.")
+        .returning(Analysis.user_id)
     )
     await db.commit()
-    return result.rowcount or 0
+    return [row[0] for row in result.all()]
 
 
 async def deactivate_user_analyses(db: AsyncSession, user_id: UUID) -> None:

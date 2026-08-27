@@ -1,7 +1,7 @@
 import { Bell, Settings, User, LogOut } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { getUnreadCount } from "../lib/notifications"
+import { useUnreadNotificationsCount } from "../lib/queries"
 import { useUser } from "../lib/userContext"
 import { useAuth } from "../hooks/useAuth"
 import UserAvatar from "./UserAvatar"
@@ -17,11 +17,7 @@ export default function PageHeader({ title, subtitle, actions }: Props) {
   const { me } = useUser()
   const { logout } = useAuth()
   const [menuOpen, setMenuOpen] = useState(false)
-  const [unread, setUnread] = useState(0)
-
-  useEffect(() => {
-    setUnread(getUnreadCount())
-  }, [])
+  const { data: unread = 0 } = useUnreadNotificationsCount()
 
   return (
     <header

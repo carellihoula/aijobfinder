@@ -26,7 +26,7 @@ async def create_application(
     return application
 
 
-async def fail_stale_cover_letters(db: AsyncSession, older_than_minutes: int = 15) -> int:
+async def fail_stale_cover_letters(db: AsyncSession, older_than_minutes: int = 15) -> list[tuple]:
     """
     Mark cover letters stuck in "processing"/"pending" as failed.
 
@@ -34,15 +34,19 @@ async def fail_stale_cover_letters(db: AsyncSession, older_than_minutes: int = 1
     inside its Celery task - if the worker is killed mid-task (reboot, broker
     state lost) the row is orphaned forever, exactly like the analysis pipeline's
     equivalent failure mode. Scheduled periodically to reconcile these.
+
+    Returns (user_id, application_id, title) for each affected row, so the caller
+    can notify the right user.
     """
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=older_than_minutes)
     result = await db.execute(
         update(Application)
         .where(Application.cover_letter_status.in_(["processing", "pending"]), Application.updated_at < cutoff)
         .values(cover_letter_status="failed")
+        .returning(Application.user_id, Application.id, Application.title)
     )
     await db.commit()
-    return result.rowcount or 0
+    return list(result.all())
 
 
 async def set_cover_letter_result(

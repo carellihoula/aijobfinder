@@ -30,6 +30,7 @@ async def init_db():
     from app.cv.models import CV                                   # noqa: F401
     from app.analysis.models import Analysis                       # noqa: F401
     from app.applications.models import Application  # noqa: F401
+    from app.notifications.models import Notification              # noqa: F401
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

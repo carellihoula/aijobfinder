@@ -27,6 +27,7 @@ def _register_all_models(**kwargs) -> None:
     from app.applications.models import Application  # noqa: F401
     from app.analysis.models import Analysis  # noqa: F401
     from app.cv.models import CV  # noqa: F401
+    from app.notifications.models import Notification  # noqa: F401
     from app.users.models import User  # noqa: F401
 
 

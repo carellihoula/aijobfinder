@@ -13,6 +13,7 @@ from app.cortex.db import init_cortex
 from app.cortex.router import router as cortex_router
 from app.db.session import init_db
 from app.logger import get_logger, setup_logging
+from app.notifications.router import router as notifications_router
 from app.users.router import router as users_router
 
 setup_logging(log_level=settings.LOG_LEVEL, log_file=settings.LOG_FILE)
@@ -51,6 +52,7 @@ app.include_router(analysis_router)
 app.include_router(applications_router)
 app.include_router(cover_letter_router)
 app.include_router(cortex_router)
+app.include_router(notifications_router)
 
 
 @app.get("/health", tags=["Health"])

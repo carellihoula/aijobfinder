@@ -121,6 +121,7 @@ def run_search(self, analysis_id: str, cv_id: str, user_id: str) -> dict:
     from app.analysis import service as analysis_svc
     from app.cv import service as cv_svc
     from app.db.session import AsyncSessionLocal
+    from app.notifications import service as notif_svc
     from app.pipeline.graph import search_pipeline
     from app.users import service as user_svc
 
@@ -163,6 +164,7 @@ def run_search(self, analysis_id: str, cv_id: str, user_id: str) -> dict:
 
             await prog.publish_done(analysis_id)
 
+            num_matches = len(accumulated.get("matches", []))
             async with AsyncSessionLocal() as db:
                 await analysis_svc.update_analysis(
                     db, UUID(analysis_id),
@@ -171,10 +173,17 @@ def run_search(self, analysis_id: str, cv_id: str, user_id: str) -> dict:
                     matches=accumulated.get("matches", []),
                     final_report=accumulated.get("final_report", ""),
                 )
+                await notif_svc.create_notification(
+                    db, UUID(user_id), type="analysis_completed",
+                    title="Analyse terminée",
+                    body=f"{num_matches} offre(s) correspondante(s) trouvée(s)." if num_matches
+                         else "Aucune offre correspondante trouvée cette fois-ci.",
+                    link="/dashboard",
+                )
 
             logger.info(
                 "[run_search] completed - analysis_id=%s matches=%d",
-                analysis_id, len(accumulated.get("matches", [])),
+                analysis_id, num_matches,
             )
             await prog.clear(analysis_id)
 
@@ -183,6 +192,12 @@ def run_search(self, analysis_id: str, cv_id: str, user_id: str) -> dict:
             logger.error("[run_search] failed - analysis_id=%s | %s", analysis_id, exc, exc_info=True)
             async with AsyncSessionLocal() as db:
                 await analysis_svc.update_analysis(db, UUID(analysis_id), status="failed", error=str(exc))
+                await notif_svc.create_notification(
+                    db, UUID(user_id), type="analysis_failed",
+                    title="Échec de l'analyse",
+                    body="Une erreur est survenue pendant votre recherche. Vous pouvez réessayer.",
+                    link="/dashboard",
+                )
 
     _dispose_engines()
     asyncio.run(_run())
@@ -333,6 +348,7 @@ def refresh_user_analyses(self) -> dict:
         from app.cortex.registry import get_cortex_updated_at
         from app.cv import service as cv_svc
         from app.db.session import AsyncSessionLocal
+        from app.notifications import service as notif_svc
         from app.pipeline.nodes.cortex_search import cortex_search_node
         from app.pipeline.nodes.embeddings_filter import embeddings_filter_node
         from app.pipeline.nodes.llm_reranker import llm_reranker_node
@@ -412,7 +428,8 @@ def refresh_user_analyses(self) -> dict:
                     for j in new_pool
                 }
 
-                if not (new_hashes - existing_hashes):
+                new_count = len(new_hashes - existing_hashes)
+                if not new_count:
                     skipped += 1
                     continue
 
@@ -432,6 +449,12 @@ def refresh_user_analyses(self) -> dict:
                         matches=state.get("matches", []),
                         final_report=state.get("final_report", ""),
                         cortex_snapshot_at=cortex_updated_at,
+                    )
+                    await notif_svc.create_notification(
+                        db, analysis.user_id, type="new_matches",
+                        title="Nouvelles offres disponibles",
+                        body=f"{new_count} nouvelle(s) offre(s) correspondant à votre profil ont été trouvée(s) cette nuit.",
+                        link="/dashboard",
                     )
 
                 refreshed += 1
@@ -500,12 +523,21 @@ def fail_stale_analyses(self, older_than_minutes: int = 30) -> dict:
     from app.applications.models import Application  # noqa: F401
     from app.cv.models import CV  # noqa: F401
     from app.db.session import AsyncSessionLocal
+    from app.notifications import service as notif_svc
     from app.users.models import User  # noqa: F401
 
     try:
         async def _run():
             async with AsyncSessionLocal() as db:
-                return await _fail_stale(db, older_than_minutes)
+                user_ids = await _fail_stale(db, older_than_minutes)
+                for user_id in user_ids:
+                    await notif_svc.create_notification(
+                        db, user_id, type="analysis_failed",
+                        title="Analyse interrompue",
+                        body="Votre recherche a été interrompue de manière inattendue. Vous pouvez relancer une nouvelle recherche.",
+                        link="/dashboard",
+                    )
+                return len(user_ids)
 
         _dispose_engines()
         count = asyncio.run(_run())
@@ -529,12 +561,21 @@ def fail_stale_cover_letters(self, older_than_minutes: int = 15) -> dict:
     """Reconcile cover letters orphaned in "processing"/"pending" by a killed worker. Scheduled periodically."""
     from app.applications.service import fail_stale_cover_letters as _fail_stale
     from app.db.session import AsyncSessionLocal
+    from app.notifications import service as notif_svc
     from app.users.models import User  # noqa: F401
 
     try:
         async def _run():
             async with AsyncSessionLocal() as db:
-                return await _fail_stale(db, older_than_minutes)
+                rows = await _fail_stale(db, older_than_minutes)
+                for user_id, application_id, title in rows:
+                    await notif_svc.create_notification(
+                        db, user_id, type="cover_letter_failed",
+                        title="Échec de génération",
+                        body=f"La génération de la lettre de motivation pour \"{title}\" a échoué. Vous pouvez réessayer.",
+                        link="/applications",
+                    )
+                return len(rows)
 
         _dispose_engines()
         count = asyncio.run(_run())
@@ -574,6 +615,7 @@ def generate_application_cover_letter(
     from app.cover_letter.generator import generate_cover_letter
     from app.cv import service as cv_svc
     from app.db.session import AsyncSessionLocal
+    from app.notifications import service as notif_svc
     from app.users import service as user_svc
 
     logger.info("[generate_application_cover_letter] started - application_id=%s", application_id)
@@ -593,6 +635,12 @@ def generate_application_cover_letter(
                 await applications_svc.set_cover_letter_result(
                     db, UUID(application_id), status="completed", content=content.model_dump(),
                 )
+                await notif_svc.create_notification(
+                    db, UUID(user_id), type="cover_letter_ready",
+                    title="Lettre de motivation prête",
+                    body=f"Votre lettre de motivation pour \"{job.get('title', 'cette offre')}\" est prête à être téléchargée.",
+                    link="/applications",
+                )
             logger.info("[generate_application_cover_letter] completed - application_id=%s", application_id)
         except Exception as exc:
             logger.error(
@@ -602,6 +650,12 @@ def generate_application_cover_letter(
             async with AsyncSessionLocal() as db:
                 await applications_svc.set_cover_letter_result(
                     db, UUID(application_id), status="failed", content=None,
+                )
+                await notif_svc.create_notification(
+                    db, UUID(user_id), type="cover_letter_failed",
+                    title="Échec de génération",
+                    body=f"La génération de la lettre de motivation pour \"{job.get('title', 'cette offre')}\" a échoué. Vous pouvez réessayer.",
+                    link="/applications",
                 )
 
     _dispose_engines()

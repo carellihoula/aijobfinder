@@ -7,7 +7,7 @@ import {
 import { useSidebar } from "../lib/sidebarContext"
 import { useUser } from "../lib/userContext"
 import { useAuth } from "../hooks/useAuth"
-import { getUnreadCount } from "../lib/notifications"
+import { useUnreadNotificationsCount } from "../lib/queries"
 import { getSavedJobs, SAVED_JOBS_EVENT } from "../lib/savedJobs"
 import { useState, useEffect } from "react"
 import UserAvatar from "./UserAvatar"
@@ -25,10 +25,9 @@ interface Section {
 }
 
 function useBadges() {
-  const [unread, setUnread] = useState(0)
+  const { data: unread = 0 } = useUnreadNotificationsCount()
   const [saved, setSaved] = useState(0)
   useEffect(() => {
-    setUnread(getUnreadCount())
     setSaved(getSavedJobs().length)
 
     const onSavedChange = () => setSaved(getSavedJobs().length)

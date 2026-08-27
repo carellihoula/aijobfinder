@@ -3,6 +3,7 @@ import { getLatestAnalysis, getCvData } from "../api/analysis"
 import { getPreferences } from "../api/users"
 import { listUsers, listAllAnalyses } from "../api/admin"
 import { listApplications } from "../api/applications"
+import { listNotifications, getUnreadCount as fetchUnreadCount } from "../api/notifications"
 
 // ─── Query keys (single source of truth for invalidation) ────────────────────
 export const QK = {
@@ -12,6 +13,8 @@ export const QK = {
   adminUsers:     ["admin", "users"] as const,
   adminAnalyses:  ["admin", "analyses"] as const,
   applications:   ["applications"]   as const,
+  notifications:      ["notifications"]        as const,
+  notificationsUnread:["notifications", "unread"] as const,
 } as const
 
 // ─── Hooks ───────────────────────────────────────────────────────────────────
@@ -63,5 +66,20 @@ export function useApplications() {
     queryKey:  QK.applications,
     queryFn:   () => listApplications().then(r => r.data),
     staleTime: 30 * 1000,
+  })
+}
+
+export function useNotifications() {
+  return useQuery({
+    queryKey: QK.notifications,
+    queryFn:  () => listNotifications().then(r => r.data),
+  })
+}
+
+export function useUnreadNotificationsCount() {
+  return useQuery({
+    queryKey:       QK.notificationsUnread,
+    queryFn:        () => fetchUnreadCount().then(r => r.data.count),
+    refetchInterval: 60 * 1000,
   })
 }
