@@ -22,7 +22,7 @@ export default function MatchCard({ match, onOpen }: CardProps) {
   return (
     <button
       onClick={onOpen}
-      className="card rounded-2xl overflow-hidden transition hover:border-line/20 w-full text-left p-4 sm:p-5"
+      className="card rounded-2xl overflow-hidden transition hover:border-line/20 hover:-translate-y-1 hover:shadow-lg cursor-pointer w-full text-left p-4 sm:p-5"
     >
       <div className="flex items-start gap-3">
         <span className="grid place-items-center h-10 w-10 rounded-xl bg-line/5 bd font-semibold text-ink shrink-0">
