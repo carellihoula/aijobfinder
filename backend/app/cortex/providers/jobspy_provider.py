@@ -10,17 +10,17 @@ from app.logger import get_logger
 logger = get_logger(__name__)
 
 _LOCATION = "France"
-_SITE_TIMEOUT = 240  # seconds — a hung call is skipped, not awaited forever
+_SITE_TIMEOUT = 240  # seconds - a hung call is skipped, not awaited forever
 _DELAY = 1.0         # between calls, be a reasonable citizen
 
 # No search_term = the site's generic "browse jobs" feed for the location, unfiltered by
-# domain/keyword — Indeed and LinkedIn both support this (real job-board browse pages).
+# domain/keyword - Indeed and LinkedIn both support this (real job-board browse pages).
 _BROAD_SITE_QUERIES: list[tuple[str, dict]] = [
     ("indeed",   {"results_wanted": 500}),
     ("linkedin", {"results_wanted": 300}),
 ]
 
-# Google Jobs isn't a job board — it's Google Search's "jobs" panel, triggered by a search
+# Google Jobs isn't a job board - it's Google Search's "jobs" panel, triggered by a search
 # query. There's no "browse everything" mode, so it needs an actual term. One representative
 # keyword per seed domain keeps it broad without looping all 130+ keywords.
 _GOOGLE_SEARCH_TERMS = [keywords[0] for keywords in SEED_KEYWORDS_BY_DOMAIN.values()]
@@ -37,7 +37,7 @@ _JOB_TYPE_MAP: dict[str, str] = {
 
 
 def _s(val) -> str:
-    """Safe string coercion — pandas represents missing values as NaN (float), which
+    """Safe string coercion - pandas represents missing values as NaN (float), which
     would otherwise stringify to the literal "nan"."""
     if val is None:
         return ""
@@ -52,12 +52,12 @@ def _s(val) -> str:
 class JobSpyProvider(JobProvider):
     """Scrapes Indeed, LinkedIn and Google Jobs via the open-source `python-jobspy` package.
 
-    Indeed and LinkedIn are pulled with no search_term — their generic "browse jobs in
+    Indeed and LinkedIn are pulled with no search_term - their generic "browse jobs in
     France" feed, unfiltered by domain/keyword. Google Jobs has no such feed (it's a search
     panel, not a job board), so it's queried once per seed-domain keyword instead.
 
     Every call (per site, or per Google search term) is isolated with its own timeout and
-    try/except — a hang or a block (LinkedIn and Indeed are the most prone to this) is logged
+    try/except - a hang or a block (LinkedIn and Indeed are the most prone to this) is logged
     and skipped, it never aborts the rest.
     """
 
@@ -85,10 +85,10 @@ class JobSpyProvider(JobProvider):
                 timeout=_SITE_TIMEOUT,
             )
         except asyncio.TimeoutError:
-            logger.warning("[jobspy] %s timed out after %ds — skipping", label, _SITE_TIMEOUT)
+            logger.warning("[jobspy] %s timed out after %ds - skipping", label, _SITE_TIMEOUT)
             return []
         except Exception as exc:
-            logger.warning("[jobspy] %s failed: %s — skipping", label, exc)
+            logger.warning("[jobspy] %s failed: %s - skipping", label, exc)
             return []
 
         if df is None or df.empty:

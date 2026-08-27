@@ -50,7 +50,7 @@ class LeverProvider(JobProvider):
                     logger.info("[lever] %s → %d jobs", company_name, len(jobs))
                 except httpx.HTTPStatusError as exc:
                     if exc.response.status_code == 404:
-                        logger.debug("[lever] %s (slug=%s) not found — skipping", company_name, slug)
+                        logger.debug("[lever] %s (slug=%s) not found - skipping", company_name, slug)
                     else:
                         logger.warning("[lever] %s failed: %s", company_name, exc)
                 except Exception as exc:

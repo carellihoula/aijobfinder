@@ -11,7 +11,7 @@ client.interceptors.response.use(
   (res) => res,
   (err) => {
     // A 401 on the "who am I" probe is expected for anonymous visitors on any public
-    // page (landing, reset-password, ...) — UserProvider already handles it gracefully.
+    // page (landing, reset-password, ...) - UserProvider already handles it gracefully.
     // Only force a redirect when an actually authenticated action fails, i.e. the
     // user's session expired mid-use.
     const isMeProbe = err.config?.url?.endsWith('/users/me')

@@ -60,8 +60,8 @@ async def search_jobs(
     Vector similarity search with hard filters on explicit user preferences.
     - contract_type: hard filter (user explicitly chose a contract type)
     - remote: hard filter (user explicitly wants remote)
-    - seniority: hard filter (user explicitly chose a level — LLM-tagged at ingestion)
-    - locations: ILIKE filter — None means no filter (all France)
+    - seniority: hard filter (user explicitly chose a level - LLM-tagged at ingestion)
+    - locations: ILIKE filter - None means no filter (all France)
     """
     embedding_str = json.dumps(query_embedding)
 
@@ -113,7 +113,7 @@ async def deactivate_old_jobs(db: AsyncSession, days: int = 30) -> int:
 
 
 async def purge_inactive_jobs(db: AsyncSession, days: int = 90) -> int:
-    """Hard-delete rows that have been inactive for `days` — frees disk space."""
+    """Hard-delete rows that have been inactive for `days` - frees disk space."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     result = await db.execute(
         delete(CortexJob)

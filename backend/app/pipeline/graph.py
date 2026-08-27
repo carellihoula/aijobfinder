@@ -11,7 +11,7 @@ from app.pipeline.state import PipelineState
 
 # ─── Pipeline 1: Profile init (upload, one-time) ──────────────────────────────
 # pdf_parser → cv_structurer → END
-# Fast extraction only — no job search.
+# Fast extraction only - no job search.
 
 def _build_profile_init() -> StateGraph:
     graph = StateGraph(PipelineState)
@@ -25,7 +25,7 @@ def _build_profile_init() -> StateGraph:
 
 # ─── Pipeline 2: Search (on-demand) ───────────────────────────────────────────
 # cortex_search → embeddings_filter → llm_reranker → report_generator
-# The Cortex is the sole source of jobs — pre-populated by nightly ingestion crons.
+# The Cortex is the sole source of jobs - pre-populated by nightly ingestion crons.
 
 def _build_search() -> StateGraph:
     graph = StateGraph(PipelineState)

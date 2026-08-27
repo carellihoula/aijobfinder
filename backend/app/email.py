@@ -21,7 +21,7 @@ def _send_sync(to: str, msg: MIMEMultipart) -> None:
 
 async def send_email(to: str, subject: str, html: str) -> None:
     if not settings.SMTP_HOST:
-        logger.info("[email] DEV — To: %s | Subject: %s\n%s", to, subject, html)
+        logger.info("[email] DEV - To: %s | Subject: %s\n%s", to, subject, html)
         return
 
     msg = MIMEMultipart("alternative")
@@ -33,7 +33,7 @@ async def send_email(to: str, subject: str, html: str) -> None:
     try:
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, _send_sync, to, msg)
-        logger.info("[email] Sent to %s — %s", to, subject)
+        logger.info("[email] Sent to %s - %s", to, subject)
     except Exception as exc:
         logger.error("[email] Failed to send to %s: %s", to, exc)
 
@@ -51,7 +51,7 @@ async def send_verification_email(to: str, token: str) -> None:
       <p style="color:#ccc;font-size:11px">{link}</p>
     </div>
     """
-    await send_email(to, "Vérifiez votre adresse e-mail — AILFJ", html)
+    await send_email(to, "Vérifiez votre adresse e-mail - AILFJ", html)
 
 
 async def send_reset_email(to: str, token: str) -> None:
@@ -67,4 +67,4 @@ async def send_reset_email(to: str, token: str) -> None:
       <p style="color:#ccc;font-size:11px">{link}</p>
     </div>
     """
-    await send_email(to, "Réinitialisation de mot de passe — AILFJ", html)
+    await send_email(to, "Réinitialisation de mot de passe - AILFJ", html)

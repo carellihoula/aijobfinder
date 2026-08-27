@@ -67,7 +67,7 @@ export default function ApplyPage() {
       const url = await fetchCvPdf(analysisId)
       setCvUrl(url)
     } catch {
-      /* keep null — iframe will show an error */
+      /* keep null - iframe will show an error */
     } finally {
       setCvLoading(false)
     }
@@ -177,7 +177,7 @@ export default function ApplyPage() {
             </div>
           </div>
 
-          {/* Suggestion zone — cover letter only */}
+          {/* Suggestion zone - cover letter only */}
           <div className="flex-1 p-4 flex flex-col gap-4">
             <div>
               <div className="flex items-center gap-2 mb-2">
@@ -232,7 +232,7 @@ export default function ApplyPage() {
           </div>
         </div>
 
-        {/* ── Right panel — PDF viewer ────────────────────────────────────────── */}
+        {/* ── Right panel - PDF viewer ────────────────────────────────────────── */}
         <div className="flex-1 flex flex-col items-center justify-center bg-[rgb(var(--bg))] relative">
           {activeLoading || regenerating ? (
             <div className="flex flex-col items-center gap-4 text-muted">

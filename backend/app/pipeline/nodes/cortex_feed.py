@@ -6,7 +6,7 @@ logger = get_logger(__name__)
 
 async def cortex_feed_node(state: PipelineState) -> dict:
     """
-    Node — After a successful API fallback, enqueue found jobs into the Cortex.
+    Node - After a successful API fallback, enqueue found jobs into the Cortex.
     Fire-and-forget via Celery: does NOT block the main pipeline.
     This is how the Cortex self-enriches from real user searches.
     """

@@ -161,7 +161,7 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      {/* Bottom — profile + logout */}
+      {/* Bottom - profile + logout */}
       <div
         className="px-2 py-2 space-y-0.5 shrink-0"
         style={{ borderTop: "1px solid rgb(var(--line) / var(--line-a))" }}

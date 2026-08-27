@@ -14,6 +14,7 @@ from app.db.session import Base
 import app.users.models   # noqa: F401
 import app.cv.models      # noqa: F401
 import app.analysis.models  # noqa: F401
+import app.applications.models  # noqa: F401
 
 config = context.config
 

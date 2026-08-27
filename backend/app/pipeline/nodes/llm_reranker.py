@@ -86,7 +86,7 @@ def _format_cv(cv: dict) -> str:
     if cv.get("education"):
         lines.append("Education:")
         for edu in cv["education"][:3]:
-            lines.append(f"  • {edu.get('degree', '')} — {edu.get('school', '')}")
+            lines.append(f"  • {edu.get('degree', '')} - {edu.get('school', '')}")
     if cv.get("languages"):
         langs = [f"{l['name']} ({l.get('level', '')})" for l in cv["languages"]]
         lines.append(f"Languages: {', '.join(langs)}")
@@ -98,7 +98,7 @@ def _format_jobs(jobs: list[dict]) -> str:
     for i, job in enumerate(jobs):
         lines.append(
             f"\n[{i}] {job.get('title', 'N/A')} @ {job.get('company', 'N/A')} "
-            f"— {job.get('location', 'N/A')}"
+            f"- {job.get('location', 'N/A')}"
         )
         lines.append(f"    {job.get('desc', '')[:400]}")
     return "\n".join(lines)
@@ -127,7 +127,7 @@ async def _rank_batch(structured_llm, cv_text: str, batch: list[dict], batch_ind
 
 
 async def llm_reranker_node(state: PipelineState) -> dict:
-    """Node 6 — Batch LLM reranker: 2 parallel batches of 30 = 60 jobs max."""
+    """Node 6 - Batch LLM reranker: 2 parallel batches of 30 = 60 jobs max."""
     cv = state.get("cv_json") or {}
     filtered_jobs = state.get("filtered_jobs") or []
     experience_level: str = state.get("experience_level") or ""
@@ -136,7 +136,7 @@ async def llm_reranker_node(state: PipelineState) -> dict:
         logger.warning("[llm_reranker] No filtered jobs to rerank")
         return {"matches": []}
 
-    # Cap at MAX_BATCHES × BATCH_SIZE — embedding filter is responsible for the rest
+    # Cap at MAX_BATCHES × BATCH_SIZE - embedding filter is responsible for the rest
     jobs_to_rank = filtered_jobs[:BATCH_SIZE * MAX_BATCHES]
     batches = [
         jobs_to_rank[i:i + BATCH_SIZE]

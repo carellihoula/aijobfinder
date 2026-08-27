@@ -27,7 +27,7 @@ logger = get_logger(__name__)
 _PIPELINE_COOLDOWN = 86_400  # 24 h in seconds
 
 
-# ─── Upload — profile init (one-time) ────────────────────────────────────────
+# ─── Upload - profile init (one-time) ────────────────────────────────────────
 
 @router.post("/upload", status_code=202)
 async def upload_cv(
@@ -37,7 +37,7 @@ async def upload_cv(
 ):
     """
     Upload a PDF CV to initialise the user's profile.
-    Runs only pdf_parser + cv_structurer — no job search.
+    Runs only pdf_parser + cv_structurer - no job search.
     Progress is published on the cv_id key (SSE: GET /analysis/init-stream/{cv_id}).
     """
     if not file.filename or not file.filename.endswith(".pdf"):
@@ -48,11 +48,11 @@ async def upload_cv(
         raise HTTPException(status_code=413, detail=f"File exceeds {settings.MAX_FILE_SIZE_MB} MB limit")
 
     # Dedup: compare only against the user's current latest CV.
-    # A match against any older CV is irrelevant — the user may have since changed CVs.
+    # A match against any older CV is irrelevant - the user may have since changed CVs.
     pdf_hash = hashlib.sha256(content).hexdigest()
     latest_cv = await cv_svc.get_latest_cv_for_user(db, current_user.id)
     if latest_cv and latest_cv.pdf_hash == pdf_hash and latest_cv.data:
-        logger.info("[upload] Same as latest CV hash — skipping re-extraction cv_id=%s", latest_cv.id)
+        logger.info("[upload] Same as latest CV hash - skipping re-extraction cv_id=%s", latest_cv.id)
         return {"cv_id": str(latest_cv.id), "status": "ready"}
 
     cv_id       = uuid_lib.uuid4()
@@ -62,7 +62,7 @@ async def upload_cv(
     from app.worker.tasks import init_profile
     init_profile.delay(cv_id=str(cv_id), user_id=str(current_user.id), pdf_path=storage_key)
 
-    logger.info("[upload] cv_id=%s user=%s — init_profile enqueued", cv_id, current_user.id)
+    logger.info("[upload] cv_id=%s user=%s - init_profile enqueued", cv_id, current_user.id)
     return {"cv_id": str(cv_id), "status": "processing"}
 
 
@@ -73,7 +73,7 @@ async def init_stream(
     cv_id: str,
     current_user: User = Depends(get_current_user),
 ):
-    """SSE — streams pdf_parser + cv_structurer progress to the browser."""
+    """SSE - streams pdf_parser + cv_structurer progress to the browser."""
     async def generate():
         async for event in prog.subscribe(cv_id):
             yield f"data: {json.dumps(event)}\n\n"
@@ -87,7 +87,7 @@ async def init_stream(
     )
 
 
-# ─── Launch search — uses profile data (on-demand) ────────────────────────────
+# ─── Launch search - uses profile data (on-demand) ────────────────────────────
 
 @router.post("/search", response_model=AnalysisResponse, status_code=202)
 async def launch_search(
@@ -138,7 +138,7 @@ async def launch_search(
         user_id=str(current_user.id),
     )
 
-    logger.info("[search] analysis_id=%s user=%s — run_search enqueued", analysis.id, current_user.id)
+    logger.info("[search] analysis_id=%s user=%s - run_search enqueued", analysis.id, current_user.id)
     await db.refresh(analysis)
     return analysis
 
@@ -199,7 +199,7 @@ async def stream_analysis(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """SSE — streams search pipeline node progress to the browser."""
+    """SSE - streams search pipeline node progress to the browser."""
     analysis = await analysis_svc.get_analysis(db, analysis_id, current_user.id)
     if not analysis:
         raise HTTPException(status_code=404, detail="Analysis not found")
@@ -232,7 +232,7 @@ async def admin_force_search(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Admin only — force a fresh search for any user using their current profile.
+    Admin only - force a fresh search for any user using their current profile.
     Bypasses rate limit and cooldown.
     """
     cv = await cv_svc.get_latest_cv_for_user(db, body.user_id)

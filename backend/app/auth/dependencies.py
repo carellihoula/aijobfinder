@@ -30,8 +30,8 @@ async def get_admin_user(current_user=Depends(get_current_user)):
     """Restrict access to admin users.
 
     Admin status is determined by two mechanisms (either is sufficient):
-      1. is_admin=True in the DB — managed via PATCH /admin/users/{id}/promote
-      2. Email listed in ADMIN_EMAILS env var — bootstrap for the first admin
+      1. is_admin=True in the DB - managed via PATCH /admin/users/{id}/promote
+      2. Email listed in ADMIN_EMAILS env var - bootstrap for the first admin
 
     Once you promote yourself via the API, you can clear ADMIN_EMAILS from .env.
     """

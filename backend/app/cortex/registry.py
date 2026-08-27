@@ -1,5 +1,5 @@
 """
-Keyword registry — Redis SET that accumulates job search queries from real user pipelines.
+Keyword registry - Redis SET that accumulates job search queries from real user pipelines.
 The nightly cron reads from here instead of static seed keywords.
 
 Also tracks cortex_updated_at: the last time the ingestion actually stored new jobs.

@@ -4,7 +4,7 @@ Publish side  (Celery worker) : await publish(analysis_id, node_name)
 Subscribe side (FastAPI SSE)  : async for event in subscribe(analysis_id): ...
 
 History is stored in a Redis LIST (1h TTL) so late SSE subscribers
-receive all past events without missing any — race-condition safe because
+receive all past events without missing any - race-condition safe because
 we subscribe to the channel BEFORE reading history.
 """
 import asyncio
@@ -62,7 +62,7 @@ async def subscribe(analysis_id: str, timeout: int = 600) -> AsyncIterator[dict]
     r = _r()
     pubsub = r.pubsub()
 
-    # Subscribe BEFORE reading history — avoids the race where done is published
+    # Subscribe BEFORE reading history - avoids the race where done is published
     # between lrange and subscribe
     await pubsub.subscribe(_CHANNEL.format(analysis_id))
 

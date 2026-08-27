@@ -36,7 +36,7 @@ export async function cacheCL(analysisId: string, jobIndex: number, blob: Blob) 
     const existing = Object.keys(localStorage).filter((k) => k.startsWith(userPdfPrefix))
     if (existing.length >= MAX_ENTRIES) localStorage.removeItem(existing[0])
     localStorage.setItem(key(PDF_PREFIX, analysisId, jobIndex), dataUrl)
-  } catch { /* quota or encoding error — skip silently */ }
+  } catch { /* quota or encoding error - skip silently */ }
 }
 
 /** Returns a fresh blob URL from the cache, or null on miss. */
@@ -52,7 +52,7 @@ export function getCachedCLUrl(analysisId: string, jobIndex: number): string | n
 export function cacheCLContent(analysisId: string, jobIndex: number, content: object) {
   try {
     localStorage.setItem(key(CONTENT_PREFIX, analysisId, jobIndex), JSON.stringify(content))
-  } catch { /* quota — skip */ }
+  } catch { /* quota - skip */ }
 }
 
 /** Returns the cached CoverLetterContent dict, or null on miss. */

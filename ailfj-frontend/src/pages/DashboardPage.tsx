@@ -159,7 +159,7 @@ function NoSearchCTA({
     return ts ? Math.max(1, Math.ceil((24 * 3_600_000 - (Date.now() - Number(ts))) / 3_600_000)) : 24
   })()
   const tooltip = rateLimited
-    ? `Limite atteinte — réessayez dans ${hours}h`
+    ? `Limite atteinte - réessayez dans ${hours}h`
     : inProgress ? "Une recherche est déjà en cours" : null
 
   return (
@@ -257,7 +257,7 @@ export default function DashboardPage() {
     }
   }
 
-  // SSE — only while processing
+  // SSE - only while processing
   const isProcessing = analysis?.status === "processing" || analysis?.status === "pending"
 
   useEffect(() => {
@@ -301,7 +301,7 @@ export default function DashboardPage() {
     return () => { cancelled = true; ctrl.abort() }
   }, [analysis?.id, isProcessing])
 
-  // Polling — while processing
+  // Polling - while processing
   useEffect(() => {
     if (!analysis?.id || !isProcessing) return
     let timer: ReturnType<typeof setTimeout>

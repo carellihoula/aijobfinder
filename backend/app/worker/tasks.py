@@ -12,7 +12,7 @@ def _dispose_engines() -> None:
 
     asyncpg connections are bound to the event loop that created them.
     When Celery runs a second task in the same worker process, asyncio.run()
-    creates a new loop — old pool connections raise "Future attached to a
+    creates a new loop - old pool connections raise "Future attached to a
     different loop". dispose(close=False) drops pool references without
     trying to close asyncpg connections (which would fail outside a greenlet).
     New connections are created fresh on the current loop.
@@ -59,7 +59,7 @@ def init_profile(self, cv_id: str, user_id: str, pdf_path: str) -> dict:
     from app.db.session import AsyncSessionLocal
     from app.pipeline.graph import profile_init_pipeline
 
-    logger.info("[init_profile] started — cv_id=%s", cv_id)
+    logger.info("[init_profile] started - cv_id=%s", cv_id)
 
     async def _run() -> None:
         state = {
@@ -91,11 +91,11 @@ def init_profile(self, cv_id: str, user_id: str, pdf_path: str) -> dict:
                     raw_text=accumulated.get("cv_text", ""),
                     data=cv_json,
                 )
-            logger.info("[init_profile] completed — cv_id=%s", cv_id)
+            logger.info("[init_profile] completed - cv_id=%s", cv_id)
 
         except Exception as exc:
             await prog.publish_done(cv_id)
-            logger.error("[init_profile] failed — cv_id=%s | %s", cv_id, exc, exc_info=True)
+            logger.error("[init_profile] failed - cv_id=%s | %s", cv_id, exc, exc_info=True)
 
     _dispose_engines()
     asyncio.run(_run())
@@ -124,7 +124,7 @@ def run_search(self, analysis_id: str, cv_id: str, user_id: str) -> dict:
     from app.pipeline.graph import search_pipeline
     from app.users import service as user_svc
 
-    logger.info("[run_search] started — analysis_id=%s", analysis_id)
+    logger.info("[run_search] started - analysis_id=%s", analysis_id)
 
     async def _run() -> None:
         async with AsyncSessionLocal() as db:
@@ -173,14 +173,14 @@ def run_search(self, analysis_id: str, cv_id: str, user_id: str) -> dict:
                 )
 
             logger.info(
-                "[run_search] completed — analysis_id=%s matches=%d",
+                "[run_search] completed - analysis_id=%s matches=%d",
                 analysis_id, len(accumulated.get("matches", [])),
             )
             await prog.clear(analysis_id)
 
         except Exception as exc:
             await prog.publish_done(analysis_id)
-            logger.error("[run_search] failed — analysis_id=%s | %s", analysis_id, exc, exc_info=True)
+            logger.error("[run_search] failed - analysis_id=%s | %s", analysis_id, exc, exc_info=True)
             async with AsyncSessionLocal() as db:
                 await analysis_svc.update_analysis(db, UUID(analysis_id), status="failed", error=str(exc))
 
@@ -206,7 +206,7 @@ def ingest_france_travail(self) -> dict:
     try:
         _dispose_engines()
         result = asyncio.run(run_provider_ingestion(FranceTravailProvider()))
-        logger.info("[worker] ingest_france_travail done — %s", result)
+        logger.info("[worker] ingest_france_travail done - %s", result)
         return result
     except Exception as exc:
         logger.error("[worker] ingest_france_travail failed: %s", exc, exc_info=True)
@@ -228,7 +228,7 @@ def ingest_greenhouse(self) -> dict:
     try:
         _dispose_engines()
         result = asyncio.run(run_provider_ingestion(GreenhouseProvider()))
-        logger.info("[worker] ingest_greenhouse done — %s", result)
+        logger.info("[worker] ingest_greenhouse done - %s", result)
         return result
     except Exception as exc:
         logger.error("[worker] ingest_greenhouse failed: %s", exc, exc_info=True)
@@ -250,7 +250,7 @@ def ingest_lever(self) -> dict:
     try:
         _dispose_engines()
         result = asyncio.run(run_provider_ingestion(LeverProvider()))
-        logger.info("[worker] ingest_lever done — %s", result)
+        logger.info("[worker] ingest_lever done - %s", result)
         return result
     except Exception as exc:
         logger.error("[worker] ingest_lever failed: %s", exc, exc_info=True)
@@ -267,7 +267,7 @@ def ingest_lever(self) -> dict:
 )
 def ingest_jobspy(self) -> dict:
     """Scrape Indeed, LinkedIn and Google Jobs (France) via python-jobspy and store in Cortex.
-    Per-site/per-query failures are isolated inside the provider — this task only fails on
+    Per-site/per-query failures are isolated inside the provider - this task only fails on
     something unrelated to a single site being unreachable."""
     from app.cortex.ingestion import run_provider_ingestion
     from app.cortex.providers.jobspy_provider import JobSpyProvider
@@ -276,7 +276,7 @@ def ingest_jobspy(self) -> dict:
     try:
         _dispose_engines()
         result = asyncio.run(run_provider_ingestion(JobSpyProvider()))
-        logger.info("[worker] ingest_jobspy done — %s", result)
+        logger.info("[worker] ingest_jobspy done - %s", result)
         return result
     except Exception as exc:
         logger.error("[worker] ingest_jobspy failed: %s", exc, exc_info=True)
@@ -297,7 +297,7 @@ def full_ingestion(self) -> dict:
     try:
         _dispose_engines()
         result = asyncio.run(run_all_providers())
-        logger.info("[worker] full_ingestion done — %s", result)
+        logger.info("[worker] full_ingestion done - %s", result)
         return result
     except Exception as exc:
         logger.error("[worker] full_ingestion failed: %s", exc, exc_info=True)
@@ -319,7 +319,7 @@ def refresh_user_analyses(self) -> dict:
       1. Re-run cortex_search
       2. If new jobs found → run embeddings_filter + llm_reranker + report_generator
       3. If unchanged → just update cortex_snapshot_at (free)
-    Scheduled at 3h — after the 2h ingestion cron.
+    Scheduled at 3h - after the 2h ingestion cron.
     """
     logger.info("[worker] refresh_user_analyses started")
 
@@ -340,7 +340,7 @@ def refresh_user_analyses(self) -> dict:
 
         cortex_updated_at = await get_cortex_updated_at()
         if cortex_updated_at is None:
-            logger.info("[refresh] cortex_updated_at not set — skipping")
+            logger.info("[refresh] cortex_updated_at not set - skipping")
             return {"checked": 0, "refreshed": 0, "skipped": 0}
 
         async with AsyncSessionLocal() as db:
@@ -416,7 +416,7 @@ def refresh_user_analyses(self) -> dict:
                     skipped += 1
                     continue
 
-                # 3. New jobs found — run embeddings_filter → llm_reranker → report_generator
+                # 3. New jobs found - run embeddings_filter → llm_reranker → report_generator
                 emb_result = await embeddings_filter_node(state)
                 state.update(emb_result)
 
@@ -440,13 +440,13 @@ def refresh_user_analyses(self) -> dict:
             except Exception as exc:
                 logger.error("[refresh] analysis %s failed: %s", analysis.id, exc, exc_info=True)
 
-        logger.info("[refresh] done — checked=%d, refreshed=%d, skipped=%d", len(analyses), refreshed, skipped)
+        logger.info("[refresh] done - checked=%d, refreshed=%d, skipped=%d", len(analyses), refreshed, skipped)
         return {"checked": len(analyses), "refreshed": refreshed, "skipped": skipped}
 
     try:
         _dispose_engines()
         result = asyncio.run(_run())
-        logger.info("[worker] refresh_user_analyses done — %s", result)
+        logger.info("[worker] refresh_user_analyses done - %s", result)
         return result
     except Exception as exc:
         logger.error("[worker] refresh_user_analyses failed: %s", exc, exc_info=True)
@@ -466,7 +466,7 @@ def cleanup_old_jobs(self, days: int = 30) -> dict:
     from app.cortex import service as cortex_svc
     from app.cortex.db import CortexSessionLocal
 
-    logger.info("[worker] cleanup_old_jobs started — days=%d", days)
+    logger.info("[worker] cleanup_old_jobs started - days=%d", days)
     try:
         async def _run():
             if CortexSessionLocal is None:
@@ -479,7 +479,7 @@ def cleanup_old_jobs(self, days: int = 30) -> dict:
 
         _dispose_engines()
         result = asyncio.run(_run())
-        logger.info("[worker] cleanup done — %s", result)
+        logger.info("[worker] cleanup done - %s", result)
         return result
     except Exception as exc:
         logger.error("[worker] cleanup failed: %s", exc, exc_info=True)
@@ -497,7 +497,7 @@ def cleanup_old_jobs(self, days: int = 30) -> dict:
 def fail_stale_analyses(self, older_than_minutes: int = 30) -> dict:
     """Reconcile analyses orphaned in "processing" by a killed worker. Scheduled periodically."""
     from app.analysis.service import fail_stale_analyses as _fail_stale
-    from app.applications.models import Application, ApplicationStep  # noqa: F401 — registers relationship targets
+    from app.applications.models import Application  # noqa: F401
     from app.cv.models import CV  # noqa: F401
     from app.db.session import AsyncSessionLocal
     from app.users.models import User  # noqa: F401
@@ -510,10 +510,39 @@ def fail_stale_analyses(self, older_than_minutes: int = 30) -> dict:
         _dispose_engines()
         count = asyncio.run(_run())
         if count:
-            logger.warning("[worker] fail_stale_analyses — %d analyses reconciled", count)
+            logger.warning("[worker] fail_stale_analyses - %d analyses reconciled", count)
         return {"reconciled": count}
     except Exception as exc:
         logger.error("[worker] fail_stale_analyses failed: %s", exc, exc_info=True)
+        raise self.retry(exc=exc)
+
+
+# ─── Task: fail_stale_cover_letters ─────────────────────────────────────────────
+
+@celery_app.task(
+    name="app.worker.tasks.fail_stale_cover_letters",
+    bind=True,
+    max_retries=2,
+    default_retry_delay=60,
+)
+def fail_stale_cover_letters(self, older_than_minutes: int = 15) -> dict:
+    """Reconcile cover letters orphaned in "processing"/"pending" by a killed worker. Scheduled periodically."""
+    from app.applications.service import fail_stale_cover_letters as _fail_stale
+    from app.db.session import AsyncSessionLocal
+    from app.users.models import User  # noqa: F401
+
+    try:
+        async def _run():
+            async with AsyncSessionLocal() as db:
+                return await _fail_stale(db, older_than_minutes)
+
+        _dispose_engines()
+        count = asyncio.run(_run())
+        if count:
+            logger.warning("[worker] fail_stale_cover_letters - %d applications reconciled", count)
+        return {"reconciled": count}
+    except Exception as exc:
+        logger.error("[worker] fail_stale_cover_letters failed: %s", exc, exc_info=True)
         raise self.retry(exc=exc)
 
 
@@ -547,7 +576,7 @@ def generate_application_cover_letter(
     from app.db.session import AsyncSessionLocal
     from app.users import service as user_svc
 
-    logger.info("[generate_application_cover_letter] started — application_id=%s", application_id)
+    logger.info("[generate_application_cover_letter] started - application_id=%s", application_id)
 
     async def _run() -> None:
         async with AsyncSessionLocal() as db:
@@ -564,10 +593,10 @@ def generate_application_cover_letter(
                 await applications_svc.set_cover_letter_result(
                     db, UUID(application_id), status="completed", content=content.model_dump(),
                 )
-            logger.info("[generate_application_cover_letter] completed — application_id=%s", application_id)
+            logger.info("[generate_application_cover_letter] completed - application_id=%s", application_id)
         except Exception as exc:
             logger.error(
-                "[generate_application_cover_letter] failed — application_id=%s | %s",
+                "[generate_application_cover_letter] failed - application_id=%s | %s",
                 application_id, exc, exc_info=True,
             )
             async with AsyncSessionLocal() as db:

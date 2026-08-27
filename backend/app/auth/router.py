@@ -91,7 +91,7 @@ async def forgot_password(data: ForgotPasswordRequest, db: AsyncSession = Depend
     if user:
         token = create_typed_token(str(user.id), "reset", expires_minutes=60)
         await send_reset_email(user.email, token)
-    # Always return ok — don't leak whether the email exists
+    # Always return ok - don't leak whether the email exists
     return {"ok": True}
 
 

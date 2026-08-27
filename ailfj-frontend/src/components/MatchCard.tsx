@@ -14,7 +14,7 @@ interface CardProps {
   onOpen: () => void
 }
 
-// Compact card for the grid — collapsed summary only, click opens the detail panel.
+// Compact card for the grid - collapsed summary only, click opens the detail panel.
 export default function MatchCard({ match, onOpen }: CardProps) {
   const tier = scoreTier(match.score)
   const tags = [match.contract, match.mode, match.seniority].filter(Boolean)
@@ -77,7 +77,7 @@ interface PanelProps {
   onSaveToggle?: () => void
 }
 
-// Modal — full detail view for the currently selected match.
+// Modal - full detail view for the currently selected match.
 export function MatchDetailModal({ match, analysisId, onClose, onApply, onSaveToggle }: PanelProps) {
   const tier = scoreTier(match.score)
   const tags = [match.contract, match.mode, match.seniority].filter(Boolean)
@@ -232,7 +232,7 @@ function SkillGroup({ tone, title, icon, skills }: {
             <span key={s} className={`text-[11px] px-2 py-1 rounded-md border ${tones.chip}`}>{s}</span>
           ))
         ) : (
-          <span className="text-[11px] text-subtle">—</span>
+          <span className="text-[11px] text-subtle">-</span>
         )}
       </div>
     </div>

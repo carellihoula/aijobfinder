@@ -112,7 +112,7 @@ class FranceTravailProvider(JobProvider):
 
     async def fetch_jobs(self) -> list[RawJob]:
         if not (settings.FRANCE_TRAVAIL_CLIENT_ID and settings.FRANCE_TRAVAIL_CLIENT_SECRET):
-            logger.warning("[france_travail] Credentials not configured — skipping")
+            logger.warning("[france_travail] Credentials not configured - skipping")
             return []
 
         all_jobs: list[RawJob] = []

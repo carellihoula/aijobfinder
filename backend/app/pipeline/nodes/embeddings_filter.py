@@ -25,7 +25,7 @@ def _build_cv_text(cv: dict) -> str:
 
 
 async def embeddings_filter_node(state: PipelineState) -> dict:
-    """Node 5 — Semantic filter: keep jobs above mean cosine similarity with CV."""
+    """Node 5 - Semantic filter: keep jobs above mean cosine similarity with CV."""
     cv = state.get("cv_json") or {}
     jobs = state.get("jobs") or []
 

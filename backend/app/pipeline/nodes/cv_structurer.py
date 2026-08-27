@@ -23,7 +23,7 @@ Rules:
 
 
 async def cv_structurer_node(state: PipelineState) -> dict:
-    """Node 2 — Force the LLM to return a strict CVSchema JSON via structured output."""
+    """Node 2 - Force the LLM to return a strict CVSchema JSON via structured output."""
 
     llm = ChatOpenAI(
         model=settings.OPENAI_MODEL,
@@ -32,7 +32,7 @@ async def cv_structurer_node(state: PipelineState) -> dict:
     )
 
     # with_structured_output activates OpenAI function-calling:
-    # the model cannot return free text — only a valid CVSchema object.
+    # the model cannot return free text - only a valid CVSchema object.
     structured_llm = llm.with_structured_output(CVSchema)
 
     messages = [
@@ -44,7 +44,7 @@ async def cv_structurer_node(state: PipelineState) -> dict:
     result: CVSchema = await structured_llm.ainvoke(messages)
 
     logger.info(
-        "[cv_structurer] Parsed — name=%s, skills=%d, experiences=%d, level=%s",
+        "[cv_structurer] Parsed - name=%s, skills=%d, experiences=%d, level=%s",
         result.full_name or "unknown",
         len(result.skills),
         len(result.experiences),

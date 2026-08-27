@@ -12,7 +12,7 @@ logger = get_logger(__name__)
 
 async def register(db: AsyncSession, data: RegisterRequest) -> str:
     if await get_user_by_email(db, data.email):
-        logger.warning("[auth] Registration failed — email already exists: %s", data.email)
+        logger.warning("[auth] Registration failed - email already exists: %s", data.email)
         raise HTTPException(status_code=400, detail="Email already registered")
 
     user = await create_user(db, data.email, hash_password(data.password), data.full_name)

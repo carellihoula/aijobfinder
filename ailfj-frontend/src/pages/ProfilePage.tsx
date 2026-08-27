@@ -259,7 +259,7 @@ function CityAutocomplete({ selected, onAdd, onRemove, onClearAll }: {
           <span className="inline-flex items-center gap-1.5 text-[12px] font-medium px-2.5 py-1 rounded-md bg-line/5 text-muted border border-line/15">
             🇫🇷 France entière
           </span>
-          <span className="text-[11px] text-subtle">— recherchez une ville pour restreindre</span>
+          <span className="text-[11px] text-subtle">- recherchez une ville pour restreindre</span>
         </div>
       )}
 
@@ -277,14 +277,14 @@ function CityAutocomplete({ selected, onAdd, onRemove, onClearAll }: {
         />
         {open && (
           <div className="absolute z-20 top-full left-0 right-0 mt-1 card rounded-lg py-1 shadow-lg border border-line/20 overflow-hidden">
-            {/* France entière option — always first when query matches or list is empty */}
+            {/* France entière option - always first when query matches or list is empty */}
             {(results.length === 0 || FRANCE_KEYWORDS.some((kw) => query.toLowerCase().startsWith(kw))) && (
               <button
                 className="w-full text-left px-3 py-2 text-[13px] text-muted hover:bg-accent/5 transition border-b border-line/10 last:border-0"
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={selectFrance}>
                 🇫🇷 <span className="font-medium text-ink">France entière</span>
-                <span className="ml-1.5 text-[11px] text-subtle">— aucun filtre géographique</span>
+                <span className="ml-1.5 text-[11px] text-subtle">- aucun filtre géographique</span>
               </button>
             )}
             {results.map((city) => (
@@ -477,7 +477,7 @@ function LanguageEditor({ languages, onChange }: {
 }
 
 // ─── Authenticated avatar image ───────────────────────────────────────────────
-// <img> doesn't send the Authorization header — fetch manually and use a blob URL.
+// <img> doesn't send the Authorization header - fetch manually and use a blob URL.
 function AuthAvatar({ avatarKey, className }: { avatarKey: string | null | undefined; className?: string }) {
   const [blobUrl, setBlobUrl] = useState<string | null>(
     avatarKey ? (blobCache.get(avatarKey) ?? null) : null
@@ -598,10 +598,10 @@ function OverviewPane({
   onAvatarDelete: () => void
   onCvUpdate: (file: File) => void
 }) {
-  const displayName = me?.full_name || me?.email || "—"
-  const email = me?.email ?? "—"
-  const userId = me?.id ?? "—"
-  const initials = displayName !== "—" ? displayName.slice(0, 2).toUpperCase() : "?"
+  const displayName = me?.full_name || me?.email || "-"
+  const email = me?.email ?? "-"
+  const userId = me?.id ?? "-"
+  const initials = displayName !== "-" ? displayName.slice(0, 2).toUpperCase() : "?"
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   return (
@@ -743,7 +743,7 @@ function OverviewPane({
 function PlanPane() {
   const features = [
     { label: "1 analyse par 24 h", ok: true },
-    { label: "Cortex partagé — offres indexées chaque nuit", ok: true },
+    { label: "Cortex partagé - offres indexées chaque nuit", ok: true },
     { label: "Lettre de motivation IA (avec affinage)", ok: true },
     { label: "Accès à tous les filtres de recherche", ok: true },
     { label: "Analyses illimitées", ok: false },
@@ -755,7 +755,7 @@ function PlanPane() {
       <div className="flex items-center justify-between px-5 py-4 border-b border-line/10">
         <div>
           <p className="text-[13px] font-semibold text-ink">Plan actuel</p>
-          <p className="text-[12px] text-muted mt-0.5">Gratuit — sans engagement</p>
+          <p className="text-[12px] text-muted mt-0.5">Gratuit - sans engagement</p>
         </div>
         <span className="text-[11px] font-semibold px-3 py-1 rounded-full bg-line/5 bd text-muted tracking-wide uppercase">Free</span>
       </div>
@@ -763,7 +763,7 @@ function PlanPane() {
         {features.map(({ label, ok }) => (
           <div key={label} className="flex items-center gap-2.5 text-[12.5px]">
             <span className={`h-4 w-4 rounded-full flex items-center justify-center shrink-0 text-[9px] font-bold ${ok ? "bg-accent/15 text-accent" : "bg-line/5 text-subtle"}`}>
-              {ok ? "✓" : "—"}
+              {ok ? "✓" : "-"}
             </span>
             <span className={ok ? "text-ink" : "text-subtle"}>{label}</span>
           </div>
@@ -785,36 +785,36 @@ function PreferencesPane({ cv, prefs, onUpdateCv, onUpdatePrefs }: {
   onUpdateCv: (updated: CvData) => void
   onUpdatePrefs: (updated: UserPreferences) => void
 }) {
-  // — Postes ciblés (saved in cv.roles) —
+  // - Postes ciblés (saved in cv.roles) -
   const [roles, setRoles] = useState<string[]>(cv?.roles ?? [])
   const [newRole, setNewRole] = useState("")
   const [rolesDirty, setRolesDirty] = useState(false)
   const [savingRoles, setSavingRoles] = useState(false)
   const roleInputRef = useRef<HTMLInputElement>(null)
 
-  // — Contrats (multi-select, saved in prefs) —
+  // - Contrats (multi-select, saved in prefs) -
   const [contractTypes, setContractTypes] = useState<string[]>(prefs.contract_types ?? [])
   const [contractDirty, setContractDirty] = useState(false)
   const [savingContract, setSavingContract] = useState(false)
 
-  // — Modes de travail (multi-select, saved in prefs) —
+  // - Modes de travail (multi-select, saved in prefs) -
   const [workModes, setWorkModes] = useState<string[]>(prefs.work_modes ?? [])
   const [workModeDirty, setWorkModeDirty] = useState(false)
   const [savingWorkMode, setSavingWorkMode] = useState(false)
 
-  // — Localisations (city autocomplete, saved in prefs) —
+  // - Localisations (city autocomplete, saved in prefs) -
   const [locations, setLocations] = useState<string[]>(prefs.locations ?? [])
   const [locationDirty, setLocationDirty] = useState(false)
   const [savingLocation, setSavingLocation] = useState(false)
 
-  // — Langues (editable list, saved in prefs) —
+  // - Langues (editable list, saved in prefs) -
   const [languages, setLanguages] = useState<CvLanguage[]>(
     prefs.languages?.length ? prefs.languages : (cv?.languages ?? [])
   )
   const [langDirty, setLangDirty] = useState(false)
   const [savingLang, setSavingLang] = useState(false)
 
-  // — Genre —
+  // - Genre -
   const [gender, setGender] = useState<"male" | "female" | "">(prefs.gender ?? "")
   const [genderDirty, setGenderDirty] = useState(false)
   const [savingGender, setSavingGender] = useState(false)
@@ -898,7 +898,7 @@ function PreferencesPane({ cv, prefs, onUpdateCv, onUpdatePrefs }: {
         <div className="space-y-3">
           <div className="flex flex-wrap gap-1.5">
             {roles.map((r) => <Chip key={r} label={r} accent onRemove={() => removeRole(r)} />)}
-            {roles.length === 0 && <p className="text-[13px] text-subtle italic">Aucun poste — ajoutez-en ci-dessous.</p>}
+            {roles.length === 0 && <p className="text-[13px] text-subtle italic">Aucun poste - ajoutez-en ci-dessous.</p>}
           </div>
           {roles.length < MAX_ROLES && (
             <div className="flex gap-2 max-w-sm">
@@ -941,7 +941,7 @@ function PreferencesPane({ cv, prefs, onUpdateCv, onUpdatePrefs }: {
               <ToggleChip key={value} label={label} selected={contractTypes.includes(value)} onToggle={() => toggleContract(value)} />
             ))}
           </div>
-          {contractTypes.length === 0 && <p className="text-[11px] text-subtle">Aucun type sélectionné — tous les contrats seront considérés.</p>}
+          {contractTypes.length === 0 && <p className="text-[11px] text-subtle">Aucun type sélectionné - tous les contrats seront considérés.</p>}
           {contractDirty && <SaveBar saving={savingContract} onSave={saveContract} onCancel={() => { setContractTypes(prefs.contract_types ?? []); setContractDirty(false) }} />}
         </div>
       </SettingRow>
@@ -954,7 +954,7 @@ function PreferencesPane({ cv, prefs, onUpdateCv, onUpdatePrefs }: {
               <ToggleChip key={value} label={label} selected={workModes.includes(value)} onToggle={() => toggleWorkMode(value)} />
             ))}
           </div>
-          {workModes.length === 0 && <p className="text-[11px] text-subtle">Aucun mode sélectionné — tous les modes seront considérés.</p>}
+          {workModes.length === 0 && <p className="text-[11px] text-subtle">Aucun mode sélectionné - tous les modes seront considérés.</p>}
           {workModeDirty && <SaveBar saving={savingWorkMode} onSave={saveWorkMode} onCancel={() => { setWorkModes(prefs.work_modes ?? []); setWorkModeDirty(false) }} />}
         </div>
       </SettingRow>
@@ -1034,7 +1034,7 @@ function StackPane({ cv, onUpdate }: { cv: CvData | null; onUpdate: (updated: Cv
       <div className="py-5">
         <div className="flex flex-wrap gap-2 mb-4">
           {skills.map((s) => <Chip key={s} label={s} onRemove={() => removeSkill(s)} />)}
-          {skills.length === 0 && <p className="text-[13px] text-subtle italic">Aucune compétence — ajoutez-en ci-dessous.</p>}
+          {skills.length === 0 && <p className="text-[13px] text-subtle italic">Aucune compétence - ajoutez-en ci-dessous.</p>}
         </div>
 
         <div className="flex gap-2 max-w-sm">
@@ -1153,7 +1153,7 @@ function ExpCard({
               {(exp.start_date || exp.end_date) && (
                 <p className="inline-flex items-center gap-1.5 text-[12px] text-subtle mt-1">
                   <Clock className="h-3 w-3" />
-                  {[exp.start_date, exp.end_date || "présent"].filter(Boolean).join(" — ")}
+                  {[exp.start_date, exp.end_date || "présent"].filter(Boolean).join(" - ")}
                 </p>
               )}
               {exp.description && <p className="text-[13px] text-muted mt-2 leading-relaxed">{exp.description}</p>}
@@ -1279,7 +1279,7 @@ function EduCard({
               {(edu.start_date || edu.end_date) && (
                 <p className="inline-flex items-center gap-1.5 text-[12px] text-subtle mt-1">
                   <Clock className="h-3 w-3" />
-                  {[edu.start_date, edu.end_date].filter(Boolean).join(" — ")}
+                  {[edu.start_date, edu.end_date].filter(Boolean).join(" - ")}
                 </p>
               )}
             </div>
@@ -1373,7 +1373,7 @@ export default function ProfilePage() {
   const [avatarUploading, setAvatarUploading] = useState(false)
   const hasAvatar = !!me?.avatar_key
 
-  const displayName = me?.full_name || me?.email || "—"
+  const displayName = me?.full_name || me?.email || "-"
 
   // Initialize local form state once from query cache (no re-init on background refetch)
   useEffect(() => {
@@ -1408,12 +1408,12 @@ export default function ProfilePage() {
       const res = await uploadCV(cvPendingFile)
       const { cv_id, status } = res.data
       if (status === "ready") {
-        // Same as current latest CV — nothing to update
+        // Same as current latest CV - nothing to update
         setCvPendingFile(null)
         setCvPhase("confirm")
         return
       }
-      // New PDF — wait for extraction via SSE (3 min timeout)
+      // New PDF - wait for extraction via SSE (3 min timeout)
       setCvPhase("extracting")
       const extracted = await new Promise<boolean>((resolve) => {
         const ctrl = new AbortController()
@@ -1532,7 +1532,7 @@ export default function ProfilePage() {
               const rlTs = localStorage.getItem("ailfj_search_rl_at")
               const hours = rlTs ? Math.max(1, Math.ceil((24 * 3_600_000 - (Date.now() - Number(rlTs))) / 3_600_000)) : 24
               const tooltip = rateLimited
-                ? `Limite atteinte — réessayez dans ${hours}h`
+                ? `Limite atteinte - réessayez dans ${hours}h`
                 : inProgress ? "Une recherche est déjà en cours" : null
               return (
                 <div className="relative group">
@@ -1585,17 +1585,17 @@ export default function ProfilePage() {
                 <AuthAvatar avatarKey={me?.avatar_key} className="h-full w-full object-cover" />
               ) : (
                 <div className="h-full w-full bg-accent/15 flex items-center justify-center text-accent text-xl font-bold select-none">
-                  {displayName !== "—" ? displayName[0].toUpperCase() : <User className="h-6 w-6" />}
+                  {displayName !== "-" ? displayName[0].toUpperCase() : <User className="h-6 w-6" />}
                 </div>
               )}
-              {/* Overlay — pointer-events-none so it never blocks the button click */}
+              {/* Overlay - pointer-events-none so it never blocks the button click */}
               <div className="pointer-events-none absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
                 {avatarUploading
                   ? <Loader2 className="h-5 w-5 text-white animate-spin" />
                   : <Camera className="h-5 w-5 text-white" />}
               </div>
             </button>
-            {/* Delete button — only shown when avatar exists */}
+            {/* Delete button - only shown when avatar exists */}
             {hasAvatar && !avatarUploading && (
               <button
                 onClick={handleAvatarDelete}
@@ -1609,7 +1609,7 @@ export default function ProfilePage() {
 
           <div className="flex-1 min-w-0">
             <p className="text-[15px] font-semibold text-ink truncate">{displayName}</p>
-            <p className="text-[12px] text-muted truncate">{me?.email ?? "—"}</p>
+            <p className="text-[12px] text-muted truncate">{me?.email ?? "-"}</p>
             {cv && (
               <p className="text-[11px] text-subtle mt-0.5">
                 {LEVEL_LABELS[cv.level] ?? cv.level}{cv.location ? ` · ${cv.location}` : ""}

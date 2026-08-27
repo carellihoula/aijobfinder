@@ -1,10 +1,10 @@
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
-from app.applications.models import Application, ApplicationStep
+from app.applications.models import Application
 
 
 async def create_application(
@@ -22,8 +22,27 @@ async def create_application(
     )
     db.add(application)
     await db.commit()
-    await db.refresh(application, attribute_names=["steps"])
+    await db.refresh(application)
     return application
+
+
+async def fail_stale_cover_letters(db: AsyncSession, older_than_minutes: int = 15) -> int:
+    """
+    Mark cover letters stuck in "processing"/"pending" as failed.
+
+    generate_application_cover_letter only ever reaches "completed"/"failed" from
+    inside its Celery task - if the worker is killed mid-task (reboot, broker
+    state lost) the row is orphaned forever, exactly like the analysis pipeline's
+    equivalent failure mode. Scheduled periodically to reconcile these.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=older_than_minutes)
+    result = await db.execute(
+        update(Application)
+        .where(Application.cover_letter_status.in_(["processing", "pending"]), Application.updated_at < cutoff)
+        .values(cover_letter_status="failed")
+    )
+    await db.commit()
+    return result.rowcount or 0
 
 
 async def set_cover_letter_result(
@@ -45,7 +64,6 @@ async def list_applications_for_user(db: AsyncSession, user_id: UUID) -> list[Ap
     result = await db.execute(
         select(Application)
         .where(Application.user_id == user_id)
-        .options(selectinload(Application.steps))
         .order_by(Application.created_at.desc())
     )
     return list(result.scalars().all())
@@ -53,9 +71,7 @@ async def list_applications_for_user(db: AsyncSession, user_id: UUID) -> list[Ap
 
 async def get_application(db: AsyncSession, application_id: UUID, user_id: UUID) -> Application | None:
     result = await db.execute(
-        select(Application)
-        .where(Application.id == application_id, Application.user_id == user_id)
-        .options(selectinload(Application.steps))
+        select(Application).where(Application.id == application_id, Application.user_id == user_id)
     )
     return result.scalar_one_or_none()
 
@@ -78,7 +94,7 @@ async def update_application(
     if status is not None:
         application.status = status
     await db.commit()
-    await db.refresh(application, attribute_names=["steps"])
+    await db.refresh(application)
     return application
 
 
@@ -87,79 +103,5 @@ async def delete_application(db: AsyncSession, application_id: UUID, user_id: UU
     if not application:
         return False
     await db.delete(application)
-    await db.commit()
-    return True
-
-
-async def add_step(
-    db: AsyncSession,
-    application_id: UUID,
-    user_id: UUID,
-    label: str,
-    status: str,
-    date=None,
-    notes: str | None = None,
-) -> ApplicationStep | None:
-    application = await get_application(db, application_id, user_id)
-    if not application:
-        return None
-    step = ApplicationStep(
-        application_id=application_id, label=label, status=status, date=date, notes=notes,
-    )
-    db.add(step)
-    application.status = status
-    await db.commit()
-    await db.refresh(step)
-    return step
-
-
-async def update_step(
-    db: AsyncSession,
-    application_id: UUID,
-    step_id: UUID,
-    user_id: UUID,
-    label: str | None = None,
-    status: str | None = None,
-    date=None,
-    notes: str | None = None,
-) -> ApplicationStep | None:
-    application = await get_application(db, application_id, user_id)
-    if not application:
-        return None
-    result = await db.execute(
-        select(ApplicationStep).where(
-            ApplicationStep.id == step_id, ApplicationStep.application_id == application_id
-        )
-    )
-    step = result.scalar_one_or_none()
-    if not step:
-        return None
-    if label is not None:
-        step.label = label
-    if status is not None:
-        step.status = status
-        application.status = status
-    if date is not None:
-        step.date = date
-    if notes is not None:
-        step.notes = notes
-    await db.commit()
-    await db.refresh(step)
-    return step
-
-
-async def delete_step(db: AsyncSession, application_id: UUID, step_id: UUID, user_id: UUID) -> bool:
-    application = await get_application(db, application_id, user_id)
-    if not application:
-        return False
-    result = await db.execute(
-        select(ApplicationStep).where(
-            ApplicationStep.id == step_id, ApplicationStep.application_id == application_id
-        )
-    )
-    step = result.scalar_one_or_none()
-    if not step:
-        return False
-    await db.delete(step)
     await db.commit()
     return True

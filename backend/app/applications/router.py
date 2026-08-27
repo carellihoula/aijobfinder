@@ -13,12 +13,10 @@ from app.applications.scraper import JobOfferNotFound, clean_pasted_text, extrac
 from app.applications.schemas import (
     ApplicationResponse,
     CreateApplicationRequest,
-    CreateStepRequest,
     PreviewRequest,
     PreviewResponse,
     RefineCoverLetterRequest,
     UpdateApplicationRequest,
-    UpdateStepRequest,
 )
 from app.auth.dependencies import get_current_user
 from app.cover_letter.generator import CoverLetterContent, render_pdf
@@ -69,7 +67,7 @@ async def create_application(
         title=payload.title, company=payload.company, description=payload.description,
         url=payload.url, summary=payload.description[:280],
     )
-    logger.info("[applications] Created — id=%s title=%r company=%r", application.id, payload.title, payload.company)
+    logger.info("[applications] Created - id=%s title=%r company=%r", application.id, payload.title, payload.company)
 
     generate_application_cover_letter.delay(
         str(application.id), _job_dict(application), str(current_user.id), payload.suggestion,
@@ -168,47 +166,3 @@ async def delete_application(
     ok = await applications_svc.delete_application(db, application_id, current_user.id)
     if not ok:
         raise HTTPException(status_code=404, detail="Application not found")
-
-
-@router.post("/{application_id}/steps", response_model=ApplicationResponse)
-async def add_step(
-    application_id: UUID,
-    payload: CreateStepRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    step = await applications_svc.add_step(
-        db, application_id, current_user.id, label=payload.label, status=payload.status, date=payload.date, notes=payload.notes,
-    )
-    if not step:
-        raise HTTPException(status_code=404, detail="Application not found")
-    return await applications_svc.get_application(db, application_id, current_user.id)
-
-
-@router.patch("/{application_id}/steps/{step_id}", response_model=ApplicationResponse)
-async def update_step(
-    application_id: UUID,
-    step_id: UUID,
-    payload: UpdateStepRequest,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    step = await applications_svc.update_step(
-        db, application_id, step_id, current_user.id,
-        label=payload.label, status=payload.status, date=payload.date, notes=payload.notes,
-    )
-    if not step:
-        raise HTTPException(status_code=404, detail="Application or step not found")
-    return await applications_svc.get_application(db, application_id, current_user.id)
-
-
-@router.delete("/{application_id}/steps/{step_id}", status_code=204)
-async def delete_step(
-    application_id: UUID,
-    step_id: UUID,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    ok = await applications_svc.delete_step(db, application_id, step_id, current_user.id)
-    if not ok:
-        raise HTTPException(status_code=404, detail="Application or step not found")

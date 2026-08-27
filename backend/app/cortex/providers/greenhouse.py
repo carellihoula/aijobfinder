@@ -48,7 +48,7 @@ class GreenhouseProvider(JobProvider):
                     logger.info("[greenhouse] %s → %d jobs", company_name, len(jobs))
                 except httpx.HTTPStatusError as exc:
                     if exc.response.status_code == 404:
-                        logger.debug("[greenhouse] %s (slug=%s) not found — skipping", company_name, slug)
+                        logger.debug("[greenhouse] %s (slug=%s) not found - skipping", company_name, slug)
                     else:
                         logger.warning("[greenhouse] %s failed: %s", company_name, exc)
                 except Exception as exc:

@@ -42,9 +42,9 @@ def _build_cv_query(cv: dict, experience_level: str) -> str:
 
 async def cortex_search_node(state: PipelineState) -> dict:
     """
-    Node 3 — Vector search in the Cortex.
+    Node 3 - Vector search in the Cortex.
     Returns jobs list (empty if Cortex has no matches).
-    The Cortex is the sole source of jobs — no API fallback.
+    The Cortex is the sole source of jobs - no API fallback.
     """
     if CortexSessionLocal is None:
         logger.warning("[cortex_search] CORTEX_DATABASE_URL not configured")
@@ -58,7 +58,7 @@ async def cortex_search_node(state: PipelineState) -> dict:
 
     cv_query = _build_cv_query(cv, experience_level)
     if not cv_query.strip():
-        logger.warning("[cortex_search] Empty CV profile — no jobs returned")
+        logger.warning("[cortex_search] Empty CV profile - no jobs returned")
         return {"jobs": []}
 
     if user_locations:
@@ -69,7 +69,7 @@ async def cortex_search_node(state: PipelineState) -> dict:
         effective_locations = [cleaned] if cleaned else None
 
     logger.info(
-        "[cortex_search] Querying Cortex — contract=%s, remote=%s, seniority=%s, locations=%s",
+        "[cortex_search] Querying Cortex - contract=%s, remote=%s, seniority=%s, locations=%s",
         contract_type or "all", remote, experience_level or "all", effective_locations,
     )
 

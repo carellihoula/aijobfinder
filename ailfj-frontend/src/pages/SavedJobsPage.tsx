@@ -70,7 +70,7 @@ export default function SavedJobsPage() {
                 <button
                   onClick={() => handleUnsave(job.id)}
                   title="Retirer"
-                  className="absolute -top-2 -right-2 z-10 h-6 w-6 rounded-full flex items-center justify-center text-subtle bg-[rgb(var(--bg))] bd shadow-md hover:text-red-500 hover:bg-red-500/10 transition"
+                  className="absolute -top-2 -right-2 z-10 h-6 w-6 rounded-full flex items-center justify-center text-subtle bg-canvas bd shadow-md hover:text-red-500 hover:bg-red-500/10 transition"
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>

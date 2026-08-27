@@ -3,15 +3,6 @@ import { client } from "./client"
 export type ApplicationStatus = "applied" | "in_progress" | "rejected" | "accepted"
 export type CoverLetterStatus = "pending" | "processing" | "completed" | "failed"
 
-export interface ApplicationStep {
-  id: string
-  label: string
-  status: ApplicationStatus
-  date: string | null
-  notes: string | null
-  created_at: string
-}
-
 export interface Application {
   id: string
   title: string
@@ -23,7 +14,6 @@ export interface Application {
   cover_letter_status: CoverLetterStatus
   created_at: string
   updated_at: string | null
-  steps: ApplicationStep[]
 }
 
 // ── List / detail / update / delete ─────────────────────────────────────────
@@ -42,22 +32,6 @@ export const updateApplication = (
 export const deleteApplication = (id: string) =>
   client.delete(`/applications/${id}`)
 
-// ── Steps ────────────────────────────────────────────────────────────────────
-
-export const addStep = (
-  applicationId: string,
-  payload: { label: string; status: ApplicationStatus; date?: string | null; notes?: string | null },
-) => client.post<Application>(`/applications/${applicationId}/steps`, payload)
-
-export const updateStep = (
-  applicationId: string,
-  stepId: string,
-  payload: { label?: string; status?: ApplicationStatus; date?: string | null; notes?: string | null },
-) => client.patch<Application>(`/applications/${applicationId}/steps/${stepId}`, payload)
-
-export const deleteStep = (applicationId: string, stepId: string) =>
-  client.delete(`/applications/${applicationId}/steps/${stepId}`)
-
 // ── Preview (scrape/paste, no persistence, no cover letter yet) ────────────
 
 export interface JobPreview {
@@ -68,8 +42,8 @@ export interface JobPreview {
   url: string | null
 }
 
-export const previewJob = (payload: { url?: string; text?: string }) =>
-  client.post<JobPreview>("/applications/preview", payload)
+export const previewJob = (payload: { url?: string; text?: string }, signal?: AbortSignal) =>
+  client.post<JobPreview>("/applications/preview", payload, { signal })
 
 // ── Create (persists + enqueues background cover letter generation) ────────
 
@@ -98,7 +72,7 @@ export const fetchApplicationCoverLetterPdf = async (applicationId: string): Pro
   })
   if (!res.ok) {
     const detail = await res.json().then((d) => d?.detail).catch(() => res.statusText)
-    throw new Error(`HTTP ${res.status} — ${detail}`)
+    throw new Error(`HTTP ${res.status} - ${detail}`)
   }
   const blob = await res.blob()
   const contentB64 = res.headers.get("X-Cover-Letter-Content")
@@ -120,8 +94,8 @@ export const pollApplication = async (
   }
 }
 
-/** Documents page helper: fetches the already-generated PDF, or — when a suggestion is
- * given — refines it first (enqueues Celery, polls, then fetches the new PDF). */
+/** Documents page helper: fetches the already-generated PDF, or - when a suggestion is
+ * given - refines it first (enqueues Celery, polls, then fetches the new PDF). */
 export const fetchOrRefineApplicationCoverLetter = async (
   applicationId: string,
   suggestion = "",
@@ -130,7 +104,7 @@ export const fetchOrRefineApplicationCoverLetter = async (
     await refineCoverLetter(applicationId, suggestion)
     const result = await pollApplication(applicationId)
     if (result.cover_letter_status !== "completed") {
-      throw new Error("La génération a échoué — réessayez.")
+      throw new Error("La génération a échoué - réessayez.")
     }
   }
   return fetchApplicationCoverLetterPdf(applicationId)

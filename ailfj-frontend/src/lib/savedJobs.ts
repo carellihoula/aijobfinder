@@ -9,7 +9,7 @@ export interface SavedJob extends DesignJobMatch {
 const key = () => scopedKey("saved_jobs")
 
 // Fired whenever the saved-jobs list changes, so any mounted component (e.g. the
-// sidebar badge count) can react instantly without polling or reloading —
+// sidebar badge count) can react instantly without polling or reloading -
 // localStorage's own "storage" event only fires in *other* tabs, not this one.
 export const SAVED_JOBS_EVENT = "savedjobs:change"
 

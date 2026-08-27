@@ -126,7 +126,7 @@ async def rerun_analysis(
 
     cv = await cv_svc.get_cv(db, analysis.cv_id)
     if not cv or not cv.pdf_path:
-        raise HTTPException(status_code=400, detail="CV file not found — cannot re-run pipeline")
+        raise HTTPException(status_code=400, detail="CV file not found - cannot re-run pipeline")
 
     filters = analysis.search_filters or {}
 
@@ -146,7 +146,7 @@ async def rerun_analysis(
     )
 
     logger.info(
-        "[admin] rerun triggered — analysis=%s cv=%s by admin=%s task=%s",
+        "[admin] rerun triggered - analysis=%s cv=%s by admin=%s task=%s",
         analysis_id, cv.id, admin.email, task.id,
     )
     return TaskResult(
@@ -170,11 +170,11 @@ async def trigger_ingestion(
     from app.worker.tasks import full_ingestion
 
     task = full_ingestion.delay(locations=body.locations or None)
-    logger.info("[admin] full_ingestion triggered by %s — task=%s", admin.email, task.id)
+    logger.info("[admin] full_ingestion triggered by %s - task=%s", admin.email, task.id)
     return TaskResult(
         task_id=task.id,
         status="queued",
-        detail="Full ingestion queued — check Flower for progress",
+        detail="Full ingestion queued - check Flower for progress",
     )
 
 
@@ -189,7 +189,7 @@ async def trigger_refresh(
     from app.worker.tasks import refresh_user_analyses
 
     task = refresh_user_analyses.delay()
-    logger.info("[admin] refresh_user_analyses triggered by %s — task=%s", admin.email, task.id)
+    logger.info("[admin] refresh_user_analyses triggered by %s - task=%s", admin.email, task.id)
     return TaskResult(
         task_id=task.id,
         status="queued",
@@ -203,15 +203,15 @@ async def trigger_cleanup(
     admin: User = Depends(get_admin_user),
 ):
     """
-    Manually trigger Cortex cleanup — deactivate jobs not seen in the last N days.
+    Manually trigger Cortex cleanup - deactivate jobs not seen in the last N days.
     Default: 30 days.
     """
     from app.worker.tasks import cleanup_old_jobs
 
     task = cleanup_old_jobs.delay(days=body.days)
-    logger.info("[admin] cleanup triggered by %s — days=%d task=%s", admin.email, body.days, task.id)
+    logger.info("[admin] cleanup triggered by %s - days=%d task=%s", admin.email, body.days, task.id)
     return TaskResult(
         task_id=task.id,
         status="queued",
-        detail=f"Cleanup queued — jobs older than {body.days} days will be deactivated",
+        detail=f"Cleanup queued - jobs older than {body.days} days will be deactivated",
     )

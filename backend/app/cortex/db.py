@@ -40,7 +40,7 @@ async def get_cortex_db():
 
 async def init_cortex() -> None:
     if cortex_engine is None:
-        logger.warning("[cortex] CORTEX_DATABASE_URL not set — Cortex disabled")
+        logger.warning("[cortex] CORTEX_DATABASE_URL not set - Cortex disabled")
         return
 
     from app.cortex.models import CortexJob  # noqa: F401

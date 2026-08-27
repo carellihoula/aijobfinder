@@ -47,7 +47,7 @@ async def get_preferences(current_user: User = Depends(get_current_user)):
 
 @router.get("/me/avatar")
 async def get_avatar(current_user: User = Depends(get_current_user)):
-    """Serve the user's avatar as a byte stream (S3 or local — no redirect)."""
+    """Serve the user's avatar as a byte stream (S3 or local - no redirect)."""
     if not current_user.avatar_key:
         raise HTTPException(status_code=404, detail="No avatar set")
 
@@ -76,7 +76,7 @@ async def upload_avatar(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Upload a new profile avatar (JPEG, PNG, WebP, GIF — max 5 MB)."""
+    """Upload a new profile avatar (JPEG, PNG, WebP, GIF - max 5 MB)."""
     ct = file.content_type or ""
     if ct not in _ALLOWED_CONTENT_TYPES:
         raise HTTPException(status_code=415, detail="Unsupported image format. Use JPEG, PNG, WebP or GIF.")

@@ -1,15 +1,15 @@
 """
-File storage abstraction — local disk or AWS S3.
+File storage abstraction - local disk or AWS S3.
 
 Backend selection (automatic):
   - S3_BUCKET + AWS_ACCESS_KEY_ID set in config → AWS S3
   - Otherwise → local UPLOAD_DIR (dev / no-S3 environments)
 
 The rest of the codebase only calls:
-  save_cv()         — persist an uploaded CV PDF
-  read_file()       — read bytes by storage key
-  get_presigned_url() — temporary download URL (S3) or None (local)
-  delete_file()     — remove a stored file
+  save_cv()         - persist an uploaded CV PDF
+  read_file()       - read bytes by storage key
+  get_presigned_url() - temporary download URL (S3) or None (local)
+  delete_file()     - remove a stored file
 """
 import os
 import uuid as _uuid
@@ -67,12 +67,12 @@ async def save_cv(
                 "original_filename": original_filename,
             },
         )
-        logger.info("[storage] S3 upload — key=%s (%d bytes)", key, len(data))
+        logger.info("[storage] S3 upload - key=%s (%d bytes)", key, len(data))
     else:
         local_path = Path(settings.UPLOAD_DIR) / key
         local_path.parent.mkdir(parents=True, exist_ok=True)
         local_path.write_bytes(data)
-        logger.info("[storage] Local save — path=%s (%d bytes)", local_path, len(data))
+        logger.info("[storage] Local save - path=%s (%d bytes)", local_path, len(data))
 
     return key
 
@@ -83,7 +83,7 @@ async def read_file(key: str) -> bytes:
         try:
             obj = _client().get_object(Bucket=settings.S3_BUCKET, Key=key)
             data = obj["Body"].read()
-            logger.debug("[storage] S3 read — key=%s (%d bytes)", key, len(data))
+            logger.debug("[storage] S3 read - key=%s (%d bytes)", key, len(data))
             return data
         except ClientError as exc:
             if exc.response["Error"]["Code"] in ("NoSuchKey", "404"):
@@ -128,12 +128,12 @@ async def save_avatar(data: bytes, user_id: str, content_type: str, ext: str) ->
             ContentType=content_type,
             CacheControl="no-cache",
         )
-        logger.info("[storage] S3 avatar upload — key=%s (%d bytes)", key, len(data))
+        logger.info("[storage] S3 avatar upload - key=%s (%d bytes)", key, len(data))
     else:
         local_path = Path(settings.UPLOAD_DIR) / key
         local_path.parent.mkdir(parents=True, exist_ok=True)
         local_path.write_bytes(data)
-        logger.info("[storage] Local avatar save — path=%s (%d bytes)", local_path, len(data))
+        logger.info("[storage] Local avatar save - path=%s (%d bytes)", local_path, len(data))
 
     return key
 
@@ -143,11 +143,11 @@ async def delete_file(key: str) -> None:
     if s3_enabled():
         try:
             _client().delete_object(Bucket=settings.S3_BUCKET, Key=key)
-            logger.info("[storage] S3 delete — key=%s", key)
+            logger.info("[storage] S3 delete - key=%s", key)
         except ClientError:
             pass
     else:
         local_path = Path(settings.UPLOAD_DIR) / key
         if local_path.exists():
             local_path.unlink()
-            logger.info("[storage] Local delete — path=%s", local_path)
+            logger.info("[storage] Local delete - path=%s", local_path)

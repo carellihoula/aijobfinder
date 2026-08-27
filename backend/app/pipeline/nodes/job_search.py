@@ -67,7 +67,7 @@ async def _search_adzuna(
     contract_type: str,
     remote: bool,
     date_posted: str,
-    experience_level: str,  # noqa: ARG001 — handled by llm_reranker
+    experience_level: str,  # noqa: ARG001 - handled by llm_reranker
 ) -> list[dict]:
     what = f"{keyword} remote" if remote else keyword
 
@@ -111,21 +111,21 @@ async def _search_adzuna(
 
 
 async def job_search_node(state: PipelineState) -> dict:
-    """Node 4 — Search Adzuna with user filters applied."""
+    """Node 4 - Search Adzuna with user filters applied."""
     keywords: list[str] = state.get("keywords") or []
 
     if not (settings.ADZUNA_APP_ID and settings.ADZUNA_APP_KEY):
         if settings.DEBUG:
-            logger.warning("[job_search] Adzuna not configured — using mock data (DEBUG)")
+            logger.warning("[job_search] Adzuna not configured - using mock data (DEBUG)")
             return {"jobs": _MOCK_JOBS}
-        logger.warning("[job_search] Adzuna not configured — returning empty")
+        logger.warning("[job_search] Adzuna not configured - returning empty")
         return {"jobs": []}
 
     if not keywords:
         if settings.DEBUG:
-            logger.warning("[job_search] No keywords — using mock data (DEBUG)")
+            logger.warning("[job_search] No keywords - using mock data (DEBUG)")
             return {"jobs": _MOCK_JOBS}
-        logger.warning("[job_search] No keywords — returning empty")
+        logger.warning("[job_search] No keywords - returning empty")
         return {"jobs": []}
 
     user_locations: list[str] = state.get("user_locations") or []
@@ -175,7 +175,7 @@ async def job_search_node(state: PipelineState) -> dict:
 
     if not jobs:
         if settings.DEBUG:
-            logger.warning("[job_search] Adzuna returned empty — using mock data (DEBUG)")
+            logger.warning("[job_search] Adzuna returned empty - using mock data (DEBUG)")
             return {"jobs": _MOCK_JOBS}
         logger.warning("[job_search] Adzuna returned empty")
         return {"jobs": []}

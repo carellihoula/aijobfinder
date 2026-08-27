@@ -41,7 +41,7 @@ Rules:
 
 async def keyword_extractor_node(state: PipelineState) -> dict:
     """
-    Node — Generate job search queries from the CV profile.
+    Node - Generate job search queries from the CV profile.
     On retry (failed_keywords not empty), generates different and broader queries.
     """
     cv = state.get("cv_json") or {}
@@ -58,7 +58,7 @@ async def keyword_extractor_node(state: PipelineState) -> dict:
 
     slots_left = MAX_KEYWORDS - len(user_keywords)
     if slots_left <= 0:
-        logger.info("[keyword_extractor] Slots full — skipping AI generation")
+        logger.info("[keyword_extractor] Slots full - skipping AI generation")
         return {"keywords": user_keywords}
 
     llm = ChatOpenAI(

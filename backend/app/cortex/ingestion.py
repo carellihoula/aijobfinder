@@ -122,7 +122,7 @@ async def run_provider_ingestion(provider: JobProvider) -> dict:
                 logger.warning("[ingestion:%s] Failed to store '%s': %s", provider.name, job_d["title"], exc)
 
     logger.info(
-        "[ingestion:%s] Done — fetched=%d, unique=%d, new=%d, stored=%d",
+        "[ingestion:%s] Done - fetched=%d, unique=%d, new=%d, stored=%d",
         provider.name, len(raw_jobs), len(unique), len(new_pairs), stored,
     )
     if stored > 0:
@@ -153,5 +153,5 @@ async def run_all_providers() -> dict:
         except Exception as exc:
             logger.error("[ingestion] Provider %s crashed: %s", provider.name, exc, exc_info=True)
 
-    logger.info("[ingestion] All providers done — %s", totals)
+    logger.info("[ingestion] All providers done - %s", totals)
     return totals

@@ -149,7 +149,7 @@ export default function StatsPage() {
             sub={tier.label}
             color={`text-[rgb(${tier.rgb})]`}
           />
-          <StatCard icon={Target}   label="Score max"         value={scores.length ? Math.max(...scores).toFixed(1) : "—"} sub="meilleure offre" color="text-violet-400" />
+          <StatCard icon={Target}   label="Score max"         value={scores.length ? Math.max(...scores).toFixed(1) : "-"} sub="meilleure offre" color="text-violet-400" />
           <StatCard icon={Bookmark} label="Offres sauvegardées" value={savedCount} sub="sur votre liste" color="text-amber-400" />
         </div>
 

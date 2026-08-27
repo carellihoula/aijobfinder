@@ -65,7 +65,7 @@ async def fail_stale_analyses(db: AsyncSession, older_than_minutes: int = 30) ->
     result = await db.execute(
         update(Analysis)
         .where(Analysis.status == "processing", Analysis.updated_at < cutoff)
-        .values(status="failed", error="Pipeline interrupted (worker restarted before completion) — please retry.")
+        .values(status="failed", error="Pipeline interrupted (worker restarted before completion) - please retry.")
     )
     await db.commit()
     return result.rowcount or 0
@@ -98,7 +98,7 @@ async def get_stale_analyses(db: AsyncSession, cortex_updated_at: datetime) -> l
 
 
 async def get_analysis_by_id(db: AsyncSession, analysis_id: UUID) -> Analysis | None:
-    """Admin-level lookup — no user_id filter."""
+    """Admin-level lookup - no user_id filter."""
     result = await db.execute(select(Analysis).where(Analysis.id == analysis_id))
     return result.scalar_one_or_none()
 

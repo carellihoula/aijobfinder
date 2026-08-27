@@ -48,7 +48,7 @@ class _Paragraph(BaseModel):
 class CoverLetterContent(BaseModel):
     """
     Complete, self-contained cover letter data.
-    Produced by the LLM — PDF backends only consume this object.
+    Produced by the LLM - PDF backends only consume this object.
     """
     # ── Header ────────────────────────────────────────────────────────────────
     sender: _Sender
@@ -101,14 +101,14 @@ Rules:
 - Tone must be adapted: formal for traditional sectors (finance, legal, healthcare), \
 dynamic for tech/startups, creative for design/media
 - Write as many paragraphs as needed (3 to 5) to make the letter compelling and complete:
-  • hook          — genuine motivation for THIS company and THIS role specifically, not generic
-  • experience    — most relevant past experience with concrete achievements and measurable results
-  • skills        — (optional) 3–4 specific technical or soft skills matching the job, with examples
-  • cultural_fit  — (optional) alignment with company values, mission or culture if clearly known
-  • call_to_action — strong closing: reinforce fit, request interview, show availability
+  • hook          - genuine motivation for THIS company and THIS role specifically, not generic
+  • experience    - most relevant past experience with concrete achievements and measurable results
+  • skills        - (optional) 3–4 specific technical or soft skills matching the job, with examples
+  • cultural_fit  - (optional) alignment with company values, mission or culture if clearly known
+  • call_to_action - strong closing: reinforce fit, request interview, show availability
 - Each paragraph: 4–5 sentences, 80–110 words. Be specific, avoid clichés, no filler.
 - closing: 1 short impactful sentence. Use "{ravi_form}" (the candidate's gender-appropriate form). Never write "ravi(e)". Example: "Je serais {ravi_form} de vous présenter ma candidature lors d'un entretien."
-- city_date format: "Ville, J mois YYYY" — use EXACTLY today's date: {today}
+- city_date format: "Ville, J mois YYYY" - use EXACTLY today's date: {today}
 - If candidate location has multiple parts, use the first city only
 - Extract sender info from the candidate profile (use empty string if missing)
 - highlighted_skills: pick the 3–5 skills most relevant to THIS specific job
@@ -122,12 +122,12 @@ You are given a cover letter that was already generated and the user wants to re
 Your job is to apply the user's refinement instructions while preserving everything that works well.
 
 Rules:
-- Keep every part the user did NOT ask to change — do not rewrite for the sake of it
+- Keep every part the user did NOT ask to change - do not rewrite for the sake of it
 - Apply the refinement instructions precisely and only where requested
 - If no explicit instruction targets a specific paragraph, keep it as-is (same wording)
 - ALL text fields must be written in French
 - closing: use "{ravi_form}" (never "ravi(e)")
-- city_date format: "Ville, J mois YYYY" — use EXACTLY today's date: {today}
+- city_date format: "Ville, J mois YYYY" - use EXACTLY today's date: {today}
 - highlighted_skills, tone and key_selling_point should only change if the instructions imply it
 """
 
@@ -142,7 +142,7 @@ async def generate_cover_letter(
     """
     Generates or refines a cover letter.
     When previous_content is provided the LLM refines the existing letter instead of
-    generating from scratch — only the parts targeted by suggestion are changed.
+    generating from scratch - only the parts targeted by suggestion are changed.
     """
     ravi_form = "ravie" if gender == "female" else "ravi"
 
@@ -170,7 +170,7 @@ async def generate_cover_letter(
     content: CoverLetterContent = await llm.ainvoke(messages)
 
     logger.info(
-        "[cover_letter_agent] %s — tone=%s paragraphs=%d",
+        "[cover_letter_agent] %s - tone=%s paragraphs=%d",
         "refined" if previous_content else "generated",
         content.tone,
         len(content.paragraphs),
@@ -212,7 +212,7 @@ def _format_cv(cv: dict) -> str:
     if cv.get("education"):
         lines.append("Education:")
         for edu in cv["education"][:2]:
-            lines.append(f"  • {edu.get('degree', '')} — {edu.get('school', '')}")
+            lines.append(f"  • {edu.get('degree', '')} - {edu.get('school', '')}")
     return "\n".join(lines)
 
 

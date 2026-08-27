@@ -24,7 +24,7 @@ async def ingest_full(_: User = Depends(_require_admin)):
     """Enqueue a full Cortex ingestion via Celery (all providers). Admin only."""
     from app.worker.tasks import full_ingestion
     task = full_ingestion.delay()
-    logger.info("[cortex] full_ingestion enqueued — task_id=%s", task.id)
+    logger.info("[cortex] full_ingestion enqueued - task_id=%s", task.id)
     return IngestionResponse(status="queued")
 
 
@@ -36,7 +36,7 @@ async def cleanup_old_jobs(
     """Enqueue cleanup of jobs not seen in the last N days. Admin only."""
     from app.worker.tasks import cleanup_old_jobs as cleanup_task
     task = cleanup_task.delay(days=days)
-    logger.info("[cortex] cleanup enqueued — task_id=%s", task.id)
+    logger.info("[cortex] cleanup enqueued - task_id=%s", task.id)
     return {"status": "queued", "task_id": task.id}
 
 

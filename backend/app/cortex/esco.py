@@ -1,5 +1,5 @@
 """
-ESCO REST API client — European Skills, Competencies, Qualifications and Occupations.
+ESCO REST API client - European Skills, Competencies, Qualifications and Occupations.
 https://esco.ec.europa.eu/api
 
 Fetches occupation titles from the official EU taxonomy to use as Cortex seed keywords.
@@ -24,7 +24,7 @@ logger = get_logger(__name__)
 _BASE_URL = "https://esco.ec.europa.eu/api"
 _LANGUAGE = "fr"
 _PAGE_SIZE = 100
-_MAX_PAGES = 10  # safety cap — 1 000 occupations per ISCO group max
+_MAX_PAGES = 10  # safety cap - 1 000 occupations per ISCO group max
 _TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=5.0)
 
 # ISCO-08 group codes mapped to our Cortex domains.

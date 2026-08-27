@@ -34,14 +34,14 @@ async def prepare_retry_node(state: PipelineState) -> dict:
     if attempts == 0:
         updates["user_locations"] = []
         logger.info(
-            "[prepare_retry] Attempt %d — failed keywords: %s | relaxing: location",
+            "[prepare_retry] Attempt %d - failed keywords: %s | relaxing: location",
             attempts + 1, failed_keywords,
         )
     else:
         updates["user_locations"] = []
         updates["contract_type"] = ""
         logger.info(
-            "[prepare_retry] Attempt %d — failed keywords: %s | relaxing: location + contract_type",
+            "[prepare_retry] Attempt %d - failed keywords: %s | relaxing: location + contract_type",
             attempts + 1, failed_keywords,
         )
 

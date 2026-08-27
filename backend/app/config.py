@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     FRANCE_TRAVAIL_CLIENT_ID: str = ""
     FRANCE_TRAVAIL_CLIENT_SECRET: str = ""
 
-    # SMTP — leave SMTP_HOST empty for dev mode (links printed to console)
+    # SMTP - leave SMTP_HOST empty for dev mode (links printed to console)
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587
     SMTP_USER: str = ""
@@ -44,7 +44,7 @@ class Settings(BaseSettings):
     SMTP_FROM: str = ""
     SMTP_FROM_NAME: str = "AILFJ"
 
-    # Frontend base URL — used to build links in emails
+    # Frontend base URL - used to build links in emails
     APP_URL: str = "http://localhost:5173"
 
     LOG_LEVEL: str = "INFO"
@@ -53,7 +53,7 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "uploads"
     MAX_FILE_SIZE_MB: int = 10
 
-    # AWS S3 — optional, falls back to local disk when not set
+    # AWS S3 - optional, falls back to local disk when not set
     AWS_REGION: str = ""
     AWS_ACCESS_KEY_ID: str = ""
     AWS_SECRET_ACCESS_KEY: str = ""

@@ -14,10 +14,10 @@ You are a professional career advisor.
 Generate a clear, structured job search report in Markdown for the candidate.
 
 The report must include:
-1. **Candidate Summary** — 2-3 sentences summarizing the profile
-2. **Top Matches** — for each job: title, company, location, score, why it fits, matching skills, missing skills, apply link
-3. **Skills Gap Analysis** — missing skills ranked by frequency across all matches
-4. **Recommendation** — 2-3 actionable sentences: what to apply to first, what to work on
+1. **Candidate Summary** - 2-3 sentences summarizing the profile
+2. **Top Matches** - for each job: title, company, location, score, why it fits, matching skills, missing skills, apply link
+3. **Skills Gap Analysis** - missing skills ranked by frequency across all matches
+4. **Recommendation** - 2-3 actionable sentences: what to apply to first, what to work on
 
 Rules:
 - Write in the same language as the candidate's CV
@@ -71,7 +71,7 @@ def _skills_gap(matches: list[dict]) -> str:
 
 
 async def report_generator_node(state: PipelineState) -> dict:
-    """Node 7 — Generate a full Markdown report from CV profile and ranked matches."""
+    """Node 7 - Generate a full Markdown report from CV profile and ranked matches."""
     cv = state.get("cv_json") or {}
     matches = state.get("matches") or []
 

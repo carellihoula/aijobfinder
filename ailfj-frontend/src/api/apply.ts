@@ -45,7 +45,7 @@ export const fetchCoverLetterPdfBlob = async (
   })
   if (!res.ok) {
     const detail = await res.json().then((d) => d?.detail).catch(() => res.statusText)
-    throw new Error(`HTTP ${res.status} — ${detail}`)
+    throw new Error(`HTTP ${res.status} - ${detail}`)
   }
 
   const blob = await res.blob()
@@ -60,7 +60,7 @@ export const fetchCoverLetterPdfBlob = async (
   return { blob, content }
 }
 
-/** Returns a blob URL — use with an <iframe> or <a download> */
+/** Returns a blob URL - use with an <iframe> or <a download> */
 export const fetchCoverLetterPdf = async (
   analysisId: string,
   jobIndex: number,
@@ -70,14 +70,14 @@ export const fetchCoverLetterPdf = async (
   return URL.createObjectURL(blob)
 }
 
-/** Returns a blob URL — streamed through the backend (no S3 CORS issues) */
+/** Returns a blob URL - streamed through the backend (no S3 CORS issues) */
 export const fetchCvPdf = async (analysisId: string): Promise<string> => {
   const res = await fetch(`/api/analysis/${analysisId}/cv`, {
     credentials: "include",
   })
   if (!res.ok) {
     const detail = await res.json().then((d) => d?.detail).catch(() => res.statusText)
-    throw new Error(`HTTP ${res.status} — ${detail}`)
+    throw new Error(`HTTP ${res.status} - ${detail}`)
   }
   const blob = await res.blob()
   if (!blob.size) throw new Error("Received empty PDF")

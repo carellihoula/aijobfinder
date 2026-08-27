@@ -50,7 +50,7 @@ async def _enrich_batch(llm, batch: list[dict], batch_idx: int) -> list[dict]:
                 enriched[meta.index]["seniority"] = meta.seniority
         return enriched
     except Exception as exc:
-        logger.warning("[enricher] Batch %d failed: %s — storing without seniority", batch_idx, exc)
+        logger.warning("[enricher] Batch %d failed: %s - storing without seniority", batch_idx, exc)
         return batch
 
 

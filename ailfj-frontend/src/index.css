@@ -65,7 +65,7 @@
     --ink:    245 245 245;
     --muted:  163 163 163;
     --subtle: 100 100 100;
-    --accent: 52 211 153;   /* emerald-400 — works with white text (4.5:1 on dark bg) */
+    --accent: 52 211 153;   /* emerald-400 - works with white text (4.5:1 on dark bg) */
     --shadow: 0 1px 3px rgba(0,0,0,.4), 0 8px 24px -8px rgba(0,0,0,.5);
   }
 
@@ -100,7 +100,7 @@
     border-bottom: 1px solid rgb(var(--line) / var(--line-a));
   }
 
-  /* Primary button — darker green so white text passes AA contrast */
+  /* Primary button - darker green so white text passes AA contrast */
   .btn-accent {
     background: #059669;   /* emerald-600: 4.6:1 contrast with white */
     color: #fff;

@@ -10,7 +10,7 @@ logger = get_logger(__name__)
 
 
 async def pdf_parser_node(state: PipelineState) -> dict:
-    """Node 1 — Extract raw text from a PDF (storage-agnostic via storage.read_file)."""
+    """Node 1 - Extract raw text from a PDF (storage-agnostic via storage.read_file)."""
     key = state["pdf_path"]
     logger.info("[pdf_parser] Reading %s", key)
 

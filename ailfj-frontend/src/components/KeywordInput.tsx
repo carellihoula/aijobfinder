@@ -58,7 +58,7 @@ export default function KeywordInput({ keywords, onChange, max = 10 }: KeywordIn
       )}
       <p className="mt-3 flex items-center gap-1.5 text-xs text-subtle">
         <Sparkles className="h-3.5 w-3.5 text-accent" />
-        Ajoutez-en quelques-uns — <span className="text-muted">l'IA complète le reste</span> à partir de votre CV.
+        Ajoutez-en quelques-uns - <span className="text-muted">l'IA complète le reste</span> à partir de votre CV.
       </p>
     </div>
   )

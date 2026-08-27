@@ -285,7 +285,7 @@ export default function AdminPage() {
                         )}
                       </td>
                       <td className="py-2.5 pr-4 text-muted max-w-[180px] truncate">
-                        {a.keywords?.slice(0, 3).join(", ") ?? "—"}
+                        {a.keywords?.slice(0, 3).join(", ") ?? "-"}
                       </td>
                       <td className="py-2.5 text-right">
                         <ActionBtn
@@ -326,7 +326,7 @@ export default function AdminPage() {
                   {users.map((u) => (
                     <tr key={u.id} className="hover:bg-line/4 transition">
                       <td className="py-2.5 pr-4 text-ink font-medium">{u.email}</td>
-                      <td className="py-2.5 pr-4 text-muted">{u.full_name ?? "—"}</td>
+                      <td className="py-2.5 pr-4 text-muted">{u.full_name ?? "-"}</td>
                       <td className="py-2.5 pr-4">
                         <span className={`inline-flex rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
                           u.is_active ? "bg-emerald-500/10 text-emerald-500" : "bg-line/10 text-muted"

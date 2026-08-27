@@ -8,7 +8,7 @@ interface Props {
   className?: string
 }
 
-// Module-level blob URL cache — survives re-mounts and page navigation
+// Module-level blob URL cache - survives re-mounts and page navigation
 // Key: avatarKey (changes when user uploads a new avatar)
 export const blobCache = new Map<string, string>()
 
@@ -32,7 +32,7 @@ export default function UserAvatar({ avatarKey, name, size = 8, className = "" }
   useEffect(() => {
     if (!avatarKey) { setBlobUrl(null); return }
 
-    // Cache hit — no fetch needed
+    // Cache hit - no fetch needed
     if (blobCache.has(avatarKey)) {
       setBlobUrl(blobCache.get(avatarKey)!)
       return
@@ -51,7 +51,7 @@ export default function UserAvatar({ avatarKey, name, size = 8, className = "" }
       .catch(() => { if (active) setBlobUrl(null) })
 
     return () => { active = false }
-    // Don't revoke on cleanup — blob stays in module cache for the session
+    // Don't revoke on cleanup - blob stays in module cache for the session
   }, [avatarKey])
 
   const initial = name ? name[0].toUpperCase() : null

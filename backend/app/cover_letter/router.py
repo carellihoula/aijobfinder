@@ -50,7 +50,7 @@ async def download_cv(
 
     filename = f"cv_{(cv.data or {}).get('full_name', 'candidate').replace(' ', '_').lower()}.pdf"
 
-    # Always stream through our server — S3 presigned redirects break fetch() in the
+    # Always stream through our server - S3 presigned redirects break fetch() in the
     # browser because S3 CORS must be configured per-origin, which fails in dev.
     try:
         pdf_bytes = await read_file(cv.pdf_path)
@@ -111,7 +111,7 @@ async def create_cover_letter(
 
 @router.post(
     "/{analysis_id}/apply",
-    summary="Apply to a job — returns CV + cover letter as separate documents",
+    summary="Apply to a job - returns CV + cover letter as separate documents",
 )
 async def apply_to_job(
     analysis_id: UUID,

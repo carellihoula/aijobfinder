@@ -20,7 +20,7 @@ export function useLatestAnalysis() {
   return useQuery({
     queryKey: QK.latestAnalysis,
     queryFn:  () => getLatestAnalysis().then(r => r.data),
-    // don't retry 404s — they are expected (no analysis yet)
+    // don't retry 404s - they are expected (no analysis yet)
     retry: (_, err: any) => err?.response?.status !== 404,
   })
 }
