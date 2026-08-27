@@ -108,8 +108,10 @@ export default function StatsPage() {
   const topMatched    = topN(matchedSkills)
   const topMissing    = topN(missingSkills)
 
+  // contract_type is always a string (never null/undefined), just sometimes empty -
+  // "||" (not "??") is required here to actually catch that case.
   const contractCounts = topN(
-    matches.map((m) => m.job.contract_type ?? "Non précisé").filter(Boolean)
+    matches.map((m) => m.job.contract_type || "Autres")
   )
 
   if (loading) {

@@ -1,5 +1,5 @@
 export type AnalysisStatus = "idle" | "processing" | "completed" | "failed"
-export type ContractType = "CDI" | "CDD" | "Freelance" | "Stage"
+export type ContractType = "CDI" | "CDD" | "Freelance" | "Stage" | "Alternance" | "Autres"
 export type WorkMode = "Remote" | "Hybride" | "Sur site"
 
 export interface DesignJobMatch {

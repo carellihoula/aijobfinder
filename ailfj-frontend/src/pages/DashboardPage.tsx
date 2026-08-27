@@ -40,10 +40,11 @@ const NODE_PROGRESS: Record<string, number> = {
 }
 
 const CONTRACT_MAP: Record<string, ContractType> = {
-  "CDI":               "CDI",
-  "Freelance / CDD":   "Freelance",
-  "Stage / Alternance":"Stage",
-  "Temps partiel":     "CDD",
+  "CDI":        "CDI",
+  "CDD":        "CDD",
+  "Stage":      "Stage",
+  "Alternance": "Alternance",
+  "Freelance":  "Freelance",
 }
 
 function formatPosted(raw: string): { label: string; days: number } | undefined {
@@ -77,7 +78,7 @@ function adaptMatch(m: BackendJobMatch, index: number): DesignJobMatch {
     logo:     m.job.company?.[0]?.toUpperCase() ?? "?",
     location: m.job.location || "Non précisé",
     mode:     (m.job.remote ? "Remote" : "Sur site") as WorkMode,
-    contract: CONTRACT_MAP[m.job.contract_type] ?? (m.job.contract_type as ContractType) ?? "CDI",
+    contract: CONTRACT_MAP[m.job.contract_type] ?? "Autres",
     seniority: "",
     score:    m.score,
     posted:   posted?.label,

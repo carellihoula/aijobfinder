@@ -1,7 +1,7 @@
 import { SlidersHorizontal, X } from "lucide-react"
 import type { MatchFilters, ContractType, WorkMode } from "../lib/designTypes"
 
-const CONTRACTS: (ContractType | "all")[] = ["all", "CDI", "CDD", "Freelance", "Stage"]
+const CONTRACTS: (ContractType | "all")[] = ["all", "CDI", "CDD", "Freelance", "Stage", "Alternance", "Autres"]
 const MODES: (WorkMode | "all")[] = ["all", "Remote", "Hybride", "Sur site"]
 const SCORES: { val: number; label: string }[] = [
   { val: 0,   label: "Tous" },

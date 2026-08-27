@@ -58,8 +58,8 @@ _CONTRACT_MAP: dict[str, str] = {
     "SAI": "CDD",   # saisonnier
     "CTT": "CDD",
     "DDU": "CDD",   # chantier
-    "PRO": "Stage",  # professionnalisation
-    "APP": "Stage",  # apprentissage
+    "PRO": "Alternance",  # professionnalisation
+    "APP": "Alternance",  # apprentissage
     "DEA": "Stage",
     "LIB": "Freelance",
     "FRA": "Freelance",

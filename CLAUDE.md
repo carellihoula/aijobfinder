@@ -72,6 +72,7 @@ Centralized pgvector job index. Pre-populated by Celery crons, served to all use
 - **No "Supabase" in code** — use `CORTEX_DATABASE_URL` everywhere, provider-agnostic
 - **Cortex is generalist** — no user_keywords in cortex_search, CV profile only (roles/skills/level)
 - **Skills extraction at runtime** — `llm_reranker` extracts matching/missing skills per job. `enricher.py` only handles seniority at ingestion.
+- **No em dash ("—") in app code or UI** — comments, log messages, and any text shown in the frontend must use a plain hyphen ("-") instead. Doesn't apply to this file.
 
 ---
 
