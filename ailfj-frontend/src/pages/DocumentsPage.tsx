@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { useLatestAnalysis } from "../lib/queries"
+import { useApplications, useCoverLetters, useLatestAnalysis } from "../lib/queries"
 import { useSearchParams } from "react-router-dom"
 import {
   FileText, Mail, ChevronDown, ChevronUp,
@@ -7,26 +7,16 @@ import {
   FileX, RefreshCw, Sparkles, RotateCcw, X, Search, Menu,
 } from "lucide-react"
 import { Document, Page, pdfjs } from "react-pdf"
+import { SimpleEditor } from "../components/tiptap-templates/simple/simple-editor"
 import Layout from "../components/Layout"
-import { fetchCvPdf, fetchCoverLetterPdfBlob, fetchExistingCoverLetterPdfBlob } from "../api/apply"
-import { fetchOrRefineApplicationCoverLetter } from "../api/applications"
-import { getSavedJobs, unsaveJob } from "../lib/savedJobs"
 import {
-  cacheCL, cacheCLContent, getCachedCLUrl, getCachedCLContent,
-  clearCachedCL, hasCachedCL, getCachedCLTimestamp,
-} from "../lib/clCache"
-
-function timeAgo(ms: number): string {
-  const diffMin = Math.floor((Date.now() - ms) / 60_000)
-  if (diffMin < 1) return "à l'instant"
-  if (diffMin < 60) return `il y a ${diffMin} min`
-  const diffH = Math.floor(diffMin / 60)
-  if (diffH < 24) return `il y a ${diffH} h`
-  const diffD = Math.floor(diffH / 24)
-  if (diffD === 1) return "hier"
-  if (diffD < 7) return `il y a ${diffD} j`
-  return new Date(ms).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })
-}
+  fetchCvPdf, updateCoverLetterBody, getCoverLetterBody, generateCoverLetterJson, exportCoverLetterPdf,
+} from "../api/apply"
+import {
+  getApplicationCoverLetterBody, generateApplicationCoverLetterJson,
+  exportApplicationCoverLetterPdf, updateApplicationCoverLetterBody,
+} from "../api/applications"
+import { getSavedJobs, unsaveJob } from "../lib/savedJobs"
 
 // PDF.js worker - renders PDF to <canvas>, no browser native viewer, no black borders
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
@@ -37,7 +27,15 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL(
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type DocKind    = "cv" | "cl"
-type CanvasState = "empty" | "pre-gen" | "loading" | "loaded" | "refine" | "error"
+// "checking" - silent existence check (DB lookup, no AI call) before deciding
+// between "pre-gen" (nothing yet) and "loaded" - renders no overlay at all, so a
+// quick DB read never flashes the "Génération en cours" spinner meant for AI calls.
+type CanvasState = "empty" | "pre-gen" | "checking" | "loading" | "loaded" | "refine" | "error"
+
+interface CachedLetter {
+  content: Record<string, unknown>
+  body: string
+}
 
 interface DocItem {
   id: string
@@ -81,43 +79,63 @@ export default function DocumentsPage() {
   const [showAll, setShowAll]         = useState(false)
   const [query, setQuery]             = useState("")
   const [mobileListOpen, setMobileListOpen] = useState(false)
+  const [letterBody, setLetterBody]   = useState("")
+  // Tiptap only reads `content` at mount time - bump this to force the editor to
+  // remount (and pick up fresh text) after a load/regenerate, without remounting
+  // on every keystroke while the user is typing.
+  const [bodyVersion, setBodyVersion] = useState(0)
+  // Structured AI content behind the current letterBody - passed back as
+  // `previousContent` when the user asks the AI to refine it further.
+  const [letterContent, setLetterContent] = useState<Record<string, unknown> | null>(null)
   const prevUrl = useRef<string | null>(null)
+  const saveBodyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Query-param offer/application is only auto-opened once - later doc-list
+  // rebuilds (e.g. a background refetch of coverLetters/applications) must not
+  // keep re-selecting it and interrupting whatever the user has since opened.
+  const hasAutoOpenedOfferRef = useRef(false)
+  const hasAutoOpenedApplicationRef = useRef(false)
+  // Session-only cache (per doc id) of already-fetched/generated letters - once a
+  // letter has been shown once, switching back to it is instant, no re-fetch.
+  const letterCacheRef = useRef<Map<string, CachedLetter>>(new Map())
 
   const { data: latestAnalysis } = useLatestAnalysis()
+  const { data: coverLetters = [] } = useCoverLetters(latestAnalysis?.id)
+  const { data: applications = [] } = useApplications()
 
-  // ── Build doc list when analysis is available ────────────────────────────────
+  // ── Build doc list when analysis is available - merges bookmarked jobs with
+  // every offer that already has a generated letter, so the list (and the
+  // letters themselves) survive a page refresh instead of only existing for the
+  // duration of one query-param navigation. ────────────────────────────────────
 
   useEffect(() => {
     if (!latestAnalysis) return
     const id    = latestAnalysis.id
     const saved = getSavedJobs()
+    const seenJobIndexes = new Set<number>()
 
     const items: DocItem[] = [
       { id: "cv", kind: "cv", label: "Mon CV", sub: "Profil principal", source: "analysis", analysisId: id },
     ]
 
+    let fromOffer: DocItem | null = null
     if (initAnalysisId && initJobIndex !== null) {
-      const fromOffer: DocItem = {
-        id: `cl-offer-${initJobIndex}`,
+      const idx = Number(initJobIndex)
+      fromOffer = {
+        id: `cl-offer-${idx}`,
         kind: "cl",
         label: initCompany ? `Lettre - ${initCompany}` : "Lettre de motivation",
         sub: initTitle ?? undefined,
         source: "analysis",
         analysisId: initAnalysisId,
-        jobIndex: Number(initJobIndex),
+        jobIndex: idx,
       }
       items.push(fromOffer)
-      setActive(fromOffer)
-      setCanvasState("pre-gen")
+      seenJobIndexes.add(idx)
     }
 
-    const offerKey = initAnalysisId && initJobIndex !== null
-      ? `${initAnalysisId}-${initJobIndex}`
-      : null
-
     for (const j of saved.slice(0, 20)) {
-      const key = `${j.analysisId}-${j.originalIndex}`
-      if (key === offerKey) continue
+      if (seenJobIndexes.has(j.originalIndex)) continue
+      seenJobIndexes.add(j.originalIndex)
       items.push({
         id: `cl-${j.id}`,
         kind: "cl",
@@ -129,28 +147,60 @@ export default function DocumentsPage() {
       })
     }
 
-    setDocs((prev) => [...items, ...prev.filter((d) => d.source === "application")])
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [latestAnalysis?.id])
+    for (const letter of coverLetters) {
+      if (seenJobIndexes.has(letter.job_index)) continue
+      seenJobIndexes.add(letter.job_index)
+      items.push({
+        id: `cl-letter-${letter.job_index}`,
+        kind: "cl",
+        label: letter.company ? `Lettre - ${letter.company}` : "Lettre de motivation",
+        sub: letter.title || undefined,
+        source: "analysis",
+        analysisId: id,
+        jobIndex: letter.job_index,
+      })
+    }
 
-  // ── Open a cover letter generated from "Mes candidatures" (independent of any analysis) ──
+    setDocs((prev) => [...items, ...prev.filter((d) => d.source === "application")])
+
+    if (fromOffer && !hasAutoOpenedOfferRef.current) {
+      hasAutoOpenedOfferRef.current = true
+      selectDoc(fromOffer)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [latestAnalysis?.id, coverLetters])
+
+  // ── Build "Mes candidatures" doc list from every application whose letter is
+  // ready - also the mechanism that removes a document here when the underlying
+  // application is deleted, since a fresh fetch simply no longer contains it. ──
 
   useEffect(() => {
-    if (!initApplicationId) return
-    const fromApplication: DocItem = {
-      id: `cl-application-${initApplicationId}`,
-      kind: "cl",
-      label: initCompany ? `Lettre - ${initCompany}` : "Lettre de motivation",
-      sub: initTitle ?? undefined,
-      source: "application",
-      analysisId: "",
-      applicationId: initApplicationId,
+    const items: DocItem[] = applications
+      .filter((a) => a.cover_letter_status === "completed")
+      .map((a) => ({
+        id: `cl-application-${a.id}`,
+        kind: "cl" as const,
+        label: `Lettre - ${a.company}`,
+        sub: a.title,
+        source: "application" as const,
+        analysisId: "",
+        applicationId: a.id,
+      }))
+
+    setDocs((prev) => [...prev.filter((d) => d.source !== "application"), ...items])
+
+    // Only auto-open once the letter is actually ready - if it's still being
+    // generated, show nothing here yet (the ref stays false so a later refetch,
+    // once it completes, still gets a chance to open it).
+    if (initApplicationId && !hasAutoOpenedApplicationRef.current) {
+      const existing = items.find((d) => d.applicationId === initApplicationId)
+      if (existing) {
+        hasAutoOpenedApplicationRef.current = true
+        selectDoc(existing)
+      }
     }
-    setDocs((prev) => [fromApplication, ...prev.filter((d) => d.id !== fromApplication.id)])
-    setActive(fromApplication)
-    doLoad(fromApplication, "")
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initApplicationId])
+  }, [applications])
 
   // ── Blob URL cleanup ────────────────────────────────────────────────────────
 
@@ -168,75 +218,67 @@ export default function DocumentsPage() {
 
   async function selectDoc(doc: DocItem) {
     setMobileListOpen(false)
+    if (saveBodyTimer.current) { clearTimeout(saveBodyTimer.current); saveBodyTimer.current = null }
     if (active?.id === doc.id && canvasState !== "error") return
     setActive(doc)
     setSuggestion("")
+    setLetterBody("")
+    setLetterContent(null)
     revokePdf()
-    if (doc.kind === "cv" || doc.source === "application") {
-      // Applications' cover letters are already generated by the time they show up
-      // here - no suggestion prompt needed, just fetch and display.
-      doLoad(doc, "")
+    if (doc.kind === "cv") {
+      doLoad(doc)
       return
     }
 
-    // Check localStorage cache first - skip Generate screen if already generated
-    const cached = getCachedCLUrl(doc.analysisId, doc.jobIndex ?? 0)
+    // Already shown once this session - reuse it instantly, no re-fetch.
+    const cached = letterCacheRef.current.get(doc.id)
     if (cached) {
-      prevUrl.current = cached
-      setPdfUrl(cached)
+      setLetterBody(cached.body)
+      setLetterContent(cached.content)
+      setBodyVersion((v) => v + 1)
       setCanvasState("loaded")
-      setZoom(1)
       return
     }
 
-    // Not in the local cache (cleared, different device, cap evicted it) - the
-    // server persists the structured content durably, so check there before
-    // asking the user to regenerate from scratch.
-    setCanvasState("loading")
+    // Not cached yet - silent DB lookup (no AI call), so no loading overlay here;
+    // "loading" is reserved for actual AI generation in generateLetter().
+    setCanvasState("checking")
+    setFetchError(null)
     try {
-      const result = await fetchExistingCoverLetterPdfBlob(doc.analysisId, doc.jobIndex ?? 0)
+      const result = doc.source === "application"
+        ? await getApplicationCoverLetterBody(doc.applicationId ?? "")
+        : await getCoverLetterBody(doc.analysisId, doc.jobIndex ?? 0)
       if (!result) {
+        // Applications are only ever listed here once completed (see the doc-list
+        // effect), so this "not generated yet" case is analysis-only - the prompt
+        // for AI instructions never applies to an application (it already has one).
         setCanvasState("pre-gen")
         return
       }
-      await cacheCL(doc.analysisId, doc.jobIndex ?? 0, result.blob)
-      if (result.content) cacheCLContent(doc.analysisId, doc.jobIndex ?? 0, result.content)
-      const url = URL.createObjectURL(result.blob)
-      prevUrl.current = url
-      setPdfUrl(url)
+      letterCacheRef.current.set(doc.id, result)
+      setLetterBody(result.body)
+      setLetterContent(result.content)
+      setBodyVersion((v) => v + 1)
       setCanvasState("loaded")
-      setZoom(1)
-    } catch {
-      setCanvasState("pre-gen")
+    } catch (e) {
+      if (doc.source === "application") {
+        setFetchError(e instanceof Error ? e.message : "Erreur inconnue")
+        setCanvasState("error")
+      } else {
+        setCanvasState("pre-gen")
+      }
     }
   }
 
-  async function doLoad(
-    doc: DocItem,
-    sug: string,
-    previousContent: Record<string, unknown> | null = null,
-  ) {
+  async function doLoad(doc: DocItem) {
     setCanvasState("loading")
     setFetchError(null)
     try {
-      let url: string
-      if (doc.kind === "cv") {
-        url = await fetchCvPdf(doc.analysisId)
-      } else if (doc.source === "application" && doc.applicationId) {
-        const { blob } = await fetchOrRefineApplicationCoverLetter(doc.applicationId, sug)
-        url = URL.createObjectURL(blob)
-      } else {
-        const { blob, content } = await fetchCoverLetterPdfBlob(
-          doc.analysisId, doc.jobIndex ?? 0, sug, previousContent,
-        )
-        await cacheCL(doc.analysisId, doc.jobIndex ?? 0, blob)
-        if (content) cacheCLContent(doc.analysisId, doc.jobIndex ?? 0, content)
-        url = URL.createObjectURL(blob)
-      }
+      const url = await fetchCvPdf(doc.analysisId)
       prevUrl.current = url
       setPdfUrl(url)
-      setCanvasState("loaded")
       setZoom(1)
+      setCanvasState("loaded")
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Erreur inconnue"
       console.error("[Documents] fetch failed:", msg)
@@ -245,23 +287,46 @@ export default function DocumentsPage() {
     }
   }
 
+  // AI generation/refinement for offer-linked letters writes straight into the
+  // editor as JSON - no PDF is ever produced here, that only happens on export.
+  async function generateLetter(
+    doc: DocItem,
+    sug: string,
+    previousContent: Record<string, unknown> | null,
+  ) {
+    setCanvasState("loading")
+    setFetchError(null)
+    try {
+      const { content, body } = doc.source === "application"
+        ? await generateApplicationCoverLetterJson(doc.applicationId ?? "", sug)
+        : await generateCoverLetterJson(doc.analysisId, doc.jobIndex ?? 0, sug, previousContent)
+      letterCacheRef.current.set(doc.id, { content, body })
+      setLetterContent(content)
+      setLetterBody(body)
+      setBodyVersion((v) => v + 1)
+      setCanvasState("loaded")
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Erreur inconnue"
+      console.error("[Documents] generate failed:", msg)
+      setFetchError(msg)
+      setCanvasState("error")
+    }
+  }
+
   function handleGenerate() {
     if (!active) return
-    doLoad(active, suggestion, null)
+    generateLetter(active, suggestion, null)
   }
 
   function handleRegenerate() {
-    // Keep the PDF visible - switch to "refine" overlay instead of wiping to pre-gen
+    // Keep the letter visible - switch to "refine" overlay instead of wiping to pre-gen
     setRefineInstruction("")
     setCanvasState("refine")
   }
 
   function handleRefine() {
     if (!active) return
-    const prevContent = getCachedCLContent(active.analysisId, active.jobIndex ?? 0)
-    clearCachedCL(active.analysisId, active.jobIndex ?? 0)
-    revokePdf()
-    doLoad(active, refineInstruction, prevContent)
+    generateLetter(active, refineInstruction, letterContent)
   }
 
   function handleCancelRefine() {
@@ -269,9 +334,24 @@ export default function DocumentsPage() {
     setCanvasState("loaded")
   }
 
+  // Manual edits autosave to the DB (debounced) - it's the source of truth the
+  // export button renders from, so a page reload never loses them.
+  function handleBodyChange(text: string) {
+    setLetterBody(text)
+    if (!active) return
+    const doc = active
+    const cached = letterCacheRef.current.get(doc.id)
+    if (cached) letterCacheRef.current.set(doc.id, { ...cached, body: text })
+    if (saveBodyTimer.current) clearTimeout(saveBodyTimer.current)
+    saveBodyTimer.current = setTimeout(() => {
+      const save = doc.source === "application"
+        ? updateApplicationCoverLetterBody(doc.applicationId ?? "", text)
+        : updateCoverLetterBody(doc.analysisId, doc.jobIndex ?? 0, text)
+      save.catch(() => { /* best-effort autosave */ })
+    }, 600)
+  }
+
   function handleRemoveDoc(doc: DocItem) {
-    // Clear PDF cache
-    if (doc.kind === "cl") clearCachedCL(doc.analysisId, doc.jobIndex ?? 0)
     // Unsave the job if it came from saved jobs
     const savedJob = getSavedJobs().find(
       (j) => j.analysisId === doc.analysisId && j.originalIndex === doc.jobIndex
@@ -286,8 +366,30 @@ export default function DocumentsPage() {
     }
   }
 
-  function handleDownload() {
-    if (!pdfUrl || !active) return
+  async function handleDownload() {
+    if (!active) return
+
+    if (isEditableLetter) {
+      // Flush the pending autosave first, then export whatever text is in the
+      // editor right now - this is the only point a PDF is ever produced.
+      if (saveBodyTimer.current) { clearTimeout(saveBodyTimer.current); saveBodyTimer.current = null }
+      try {
+        const blob = active.source === "application"
+          ? await exportApplicationCoverLetterPdf(active.applicationId ?? "", letterBody)
+          : await exportCoverLetterPdf(active.analysisId, active.jobIndex ?? 0, letterBody)
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement("a")
+        a.href = url
+        a.download = `lettre_${active.label.replace(/[^a-z0-9]/gi, "_")}.pdf`
+        a.click()
+        URL.revokeObjectURL(url)
+      } catch (e) {
+        console.error("[Documents] export failed:", e)
+      }
+      return
+    }
+
+    if (!pdfUrl) return
     const a = document.createElement("a")
     a.href = pdfUrl
     a.download = active.kind === "cv"
@@ -299,6 +401,10 @@ export default function DocumentsPage() {
   const zoomIn  = () => setZoom((z) => Math.min(ZOOM_MAX, +(z + ZOOM_STEP).toFixed(2)))
   const zoomOut = () => setZoom((z) => Math.max(ZOOM_MIN, +(z - ZOOM_STEP).toFixed(2)))
 
+  // Every generated cover letter (Cortex match or manually added application) is
+  // directly editable in place via SimpleEditor; only the CV stays a PDF preview.
+  const isEditableLetter = active?.kind === "cl"
+
   const q = query.trim().toLowerCase()
   const filteredDocs = q
     ? docs.filter((d) => d.label.toLowerCase().includes(q) || (d.sub ?? "").toLowerCase().includes(q))
@@ -306,10 +412,26 @@ export default function DocumentsPage() {
   const visible = showAll ? filteredDocs : filteredDocs.slice(0, LIST_LIMIT)
   const hasMore = filteredDocs.length > LIST_LIMIT
 
+  const showLetterActions = isEditableLetter && (canvasState === "loaded" || canvasState === "refine")
+  const headerActions = showLetterActions ? (
+    <>
+      <button onClick={handleRegenerate}
+        className="btn-ghost ring-focus flex items-center gap-1.5 rounded-lg px-3 h-8 text-[12px] shrink-0">
+        <Sparkles className="h-3.5 w-3.5" />
+        <span className="hidden sm:inline">Affiner avec l'IA</span>
+      </button>
+      <button onClick={handleDownload}
+        className="btn-accent ring-focus flex items-center gap-1.5 rounded-lg px-3 h-8 text-[12px] font-medium shrink-0">
+        <Download className="h-3.5 w-3.5" />
+        <span className="hidden sm:inline">Exporter en PDF</span>
+      </button>
+    </>
+  ) : undefined
+
   // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
-    <Layout title="Documents" subtitle="Gérez et visualisez vos documents">
+    <Layout title="Documents" subtitle="Gérez et visualisez vos documents" actions={headerActions}>
       <div className="flex relative" style={{ height: "calc(100vh - 56px)" }}>
 
         {/* ── Mobile backdrop ────────────────────────────────────────────── */}
@@ -377,8 +499,6 @@ export default function DocumentsPage() {
                   {visible.map((doc) => {
                     const isActive = active?.id === doc.id
                     const Icon     = doc.kind === "cv" ? FileText : Mail
-                    const cached   = doc.kind === "cl" && hasCachedCL(doc.analysisId, doc.jobIndex ?? 0)
-                    const cachedAt = cached ? getCachedCLTimestamp(doc.analysisId, doc.jobIndex ?? 0) : null
                     return (
                       <div key={doc.id} className="group/item relative">
                         <button
@@ -397,7 +517,7 @@ export default function DocumentsPage() {
                               {doc.label}
                             </p>
                             <p className="text-[10px] text-subtle truncate mt-0.5">
-                              {cachedAt ? `Généré ${timeAgo(cachedAt)} · ` : ""}{doc.sub ?? ""}
+                              {doc.sub ?? ""}
                             </p>
                           </div>
                         </button>
@@ -436,172 +556,221 @@ export default function DocumentsPage() {
         {/* ── Canvas area ────────────────────────────────────────────────── */}
         <div className="flex-1 flex flex-col min-w-0 relative">
 
-          {/* Toolbar */}
-          <div
-            className="h-12 flex items-center gap-2 px-4 shrink-0"
-            style={{
-              borderBottom: "1px solid rgb(var(--line) / var(--line-a))",
-              background: "rgb(var(--card))",
-            }}
-          >
-            {/* Mobile: open the documents drawer */}
-            <button
-              onClick={() => setMobileListOpen(true)}
-              className="sm:hidden grid place-items-center h-8 w-8 rounded-lg btn-ghost text-muted shrink-0"
-              title="Mes documents"
-            >
-              <Menu className="h-4 w-4" />
-            </button>
-
-            {active ? (
-              <>
-                {/* Doc identity */}
-                <div className="flex items-center gap-2 min-w-0 flex-1">
-                  {active.kind === "cv"
-                    ? <FileText className="h-3.5 w-3.5 text-accent shrink-0" />
-                    : <Mail className="h-3.5 w-3.5 text-accent shrink-0" />
-                  }
-                  <span className="text-[12px] font-medium text-ink truncate">{active.label}</span>
-                  {active.sub && (
-                    <span className="text-[11px] text-subtle hidden sm:block shrink-0">· {active.sub}</span>
+          {isEditableLetter && canvasState !== "error" ? (
+            /* Letter editor - SimpleEditor IS the canvas here, full-bleed, no PDF
+               preview at all, in every state (pre-gen/loading/loaded/refine) so it
+               never gets swapped out for a different screen. Régénérer/Exporter
+               live in the page header (see `headerActions` below). */
+            <div className="flex-1 min-h-0 relative">
+              <SimpleEditor
+                key={`${active?.id}-${bodyVersion}`}
+                content={letterBody}
+                onUpdate={handleBodyChange}
+              />
+              {(canvasState === "loading" || canvasState === "pre-gen") && (
+                <div
+                  className="absolute inset-0 z-[60] flex items-center justify-center px-4"
+                  style={{
+                    background: "rgb(var(--bg) / 0.2)",
+                    backdropFilter: "blur(1px)",
+                    WebkitBackdropFilter: "blur(1px)",
+                  }}
+                >
+                  {canvasState === "pre-gen" && active ? (
+                    <GeneratePrompt
+                      label={active.label}
+                      sub={active.sub}
+                      suggestion={suggestion}
+                      onSuggestion={setSuggestion}
+                      onGenerate={handleGenerate}
+                    />
+                  ) : (
+                    <div
+                      className="flex flex-col items-center gap-3 rounded-2xl px-8 py-6"
+                      style={{
+                        background: "rgb(var(--card))",
+                        border: "1px solid rgb(var(--line) / var(--line-a))",
+                        boxShadow: "0 8px 40px rgba(0,0,0,0.15), 0 2px 8px rgba(0,0,0,0.08)",
+                      }}
+                    >
+                      <div className="relative">
+                        <div className="h-14 w-14 rounded-2xl bg-accent/10 flex items-center justify-center">
+                          <Sparkles className="h-7 w-7 text-accent" />
+                        </div>
+                        <Loader2 className="absolute -bottom-1 -right-1 h-5 w-5 text-accent animate-spin" />
+                      </div>
+                      <div className="text-center">
+                        <p className="text-sm font-medium text-ink">Génération en cours…</p>
+                        <p className="text-xs text-muted mt-0.5">L'IA rédige votre lettre de motivation</p>
+                      </div>
+                    </div>
                   )}
                 </div>
-
-                {/* Zoom - only when PDF loaded */}
-                {canvasState === "loaded" && (
-                  <>
-                    <div
-                      className="flex items-center rounded-lg overflow-hidden shrink-0"
-                      style={{ border: "1px solid rgb(var(--line) / var(--line-a))" }}
-                    >
-                      <button onClick={zoomOut} disabled={zoom <= ZOOM_MIN}
-                        className="h-7 w-7 flex items-center justify-center text-muted hover:bg-line/5 hover:text-ink transition disabled:opacity-30"
-                        title="Zoom arrière">
-                        <ZoomOut className="h-3.5 w-3.5" />
-                      </button>
-                      <button onClick={() => setZoom(1)}
-                        className="h-7 w-14 text-[11px] font-mono text-muted hover:bg-line/5 hover:text-ink transition"
-                        title="Réinitialiser"
-                        style={{ borderLeft: "1px solid rgb(var(--line) / var(--line-a))", borderRight: "1px solid rgb(var(--line) / var(--line-a))" }}>
-                        {Math.round(zoom * 100)}%
-                      </button>
-                      <button onClick={zoomIn} disabled={zoom >= ZOOM_MAX}
-                        className="h-7 w-7 flex items-center justify-center text-muted hover:bg-line/5 hover:text-ink transition disabled:opacity-30"
-                        title="Zoom avant">
-                        <ZoomIn className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-
-                    {/* Regenerate - CL only */}
-                    {active.kind === "cl" && (
-                      <button onClick={handleRegenerate}
-                        className="btn-ghost ring-focus flex items-center gap-1.5 rounded-lg px-3 h-8 text-[12px] shrink-0">
-                        <RotateCcw className="h-3.5 w-3.5" />
-                        <span className="hidden sm:inline">Régénérer</span>
-                      </button>
-                    )}
-
-                    {/* Download */}
-                    <button onClick={handleDownload}
-                      className="btn-accent ring-focus flex items-center gap-1.5 rounded-lg px-3 h-8 text-[12px] font-medium shrink-0">
-                      <Download className="h-3.5 w-3.5" />
-                      <span className="hidden sm:inline">Télécharger</span>
-                    </button>
-                  </>
-                )}
-              </>
-            ) : (
-              <p className="text-[12px] text-subtle">Sélectionnez un document dans la liste</p>
-            )}
-          </div>
-
-          {/* Canvas viewport - dot grid, style Canva */}
-          <div
-            className="flex-1 overflow-auto"
-            style={{
-              backgroundColor: "rgb(var(--well))",
-              backgroundImage: "radial-gradient(circle, rgb(var(--line) / 0.25) 1.5px, transparent 1.5px)",
-              backgroundSize: "24px 24px",
-            }}
-          >
-            {/* min-width:max-content pour scroll horizontal quand zoomé */}
-            <div
-              className="relative flex flex-col items-center px-10 py-10"
-              style={{ minWidth: "max-content", minHeight: "100%" }}
-            >
-
-              {/* ── Empty ── */}
-              {canvasState === "empty" && (
-                <div className="flex items-center justify-center" style={{ minHeight: "calc(100vh - 56px - 48px)" }}>
-                  <EmptyCanvas />
-                </div>
-              )}
-
-              {/* ── Pre-generate (CL selected) ── */}
-              {canvasState === "pre-gen" && active && (
-                <div className="flex items-center justify-center w-full" style={{ minHeight: "calc(100vh - 56px - 48px)" }}>
-                <GeneratePrompt
-                  label={active.label}
-                  sub={active.sub}
-                  suggestion={suggestion}
-                  onSuggestion={setSuggestion}
-                  onGenerate={handleGenerate}
-                />
-                </div>
-              )}
-
-              {/* ── Loading ── */}
-              {canvasState === "loading" && (
-                <div className="flex flex-col items-center justify-center gap-3" style={{ minHeight: "calc(100vh - 56px - 48px)" }}>
-                  <div className="relative">
-                    <div className="h-14 w-14 rounded-2xl bg-accent/10 flex items-center justify-center">
-                      <Sparkles className="h-7 w-7 text-accent" />
-                    </div>
-                    <Loader2 className="absolute -bottom-1 -right-1 h-5 w-5 text-accent animate-spin" />
-                  </div>
-                  <div className="text-center">
-                    <p className="text-sm font-medium text-ink">
-                      {active?.kind === "cl" ? "Génération en cours…" : "Chargement…"}
-                    </p>
-                    <p className="text-xs text-muted mt-0.5">
-                      {active?.kind === "cl" ? "L'IA rédige votre lettre de motivation" : "Récupération du document"}
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {/* ── Error ── */}
-              {canvasState === "error" && active && (
-                <div className="flex flex-col items-center justify-center gap-4 text-center" style={{ minHeight: "calc(100vh - 56px - 48px)" }}>
-                  <div className="h-14 w-14 rounded-2xl bg-red-500/10 flex items-center justify-center">
-                    <FileX className="h-7 w-7 text-red-400" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-ink mb-1">Chargement impossible</p>
-                    <p className="text-xs text-muted mb-2 max-w-xs">
-                      Vérifiez que l'analyse est terminée et réessayez.
-                    </p>
-                    {fetchError && (
-                      <p className="text-[10px] font-mono text-red-400 bg-red-500/8 border border-red-500/15 rounded px-2 py-1 max-w-xs break-all mb-3">
-                        {fetchError}
-                      </p>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => active.kind === "cl" ? setCanvasState("pre-gen") : doLoad(active, "")}
-                    className="btn-ghost ring-focus inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm"
-                  >
-                    <RefreshCw className="h-3.5 w-3.5" /> Réessayer
-                  </button>
-                </div>
-              )}
-
-              {/* ── PDF loaded - rendered via PDF.js to <canvas>, no browser viewer chrome ── */}
-              {(canvasState === "loaded" || canvasState === "refine") && pdfUrl && (
-                <PdfViewer url={pdfUrl} zoom={zoom} />
               )}
             </div>
-          </div>
+          ) : (
+            <>
+              {/* Toolbar */}
+              <div
+                className="h-12 flex items-center gap-2 px-4 shrink-0"
+                style={{
+                  borderBottom: "1px solid rgb(var(--line) / var(--line-a))",
+                  background: "rgb(var(--card))",
+                }}
+              >
+                {/* Mobile: open the documents drawer */}
+                <button
+                  onClick={() => setMobileListOpen(true)}
+                  className="sm:hidden grid place-items-center h-8 w-8 rounded-lg btn-ghost text-muted shrink-0"
+                  title="Mes documents"
+                >
+                  <Menu className="h-4 w-4" />
+                </button>
+
+                {active ? (
+                  <>
+                    {/* Doc identity */}
+                    <div className="flex items-center gap-2 min-w-0 flex-1">
+                      {active.kind === "cv"
+                        ? <FileText className="h-3.5 w-3.5 text-accent shrink-0" />
+                        : <Mail className="h-3.5 w-3.5 text-accent shrink-0" />
+                      }
+                      <span className="text-[12px] font-medium text-ink truncate">{active.label}</span>
+                      {active.sub && (
+                        <span className="text-[11px] text-subtle hidden sm:block shrink-0">· {active.sub}</span>
+                      )}
+                    </div>
+
+                    {/* Actions - once loaded */}
+                    {canvasState === "loaded" && (
+                      <>
+                        {/* Zoom - PDF views only */}
+                        <div
+                          className="flex items-center rounded-lg overflow-hidden shrink-0"
+                          style={{ border: "1px solid rgb(var(--line) / var(--line-a))" }}
+                        >
+                          <button onClick={zoomOut} disabled={zoom <= ZOOM_MIN}
+                            className="h-7 w-7 flex items-center justify-center text-muted hover:bg-line/5 hover:text-ink transition disabled:opacity-30"
+                            title="Zoom arrière">
+                            <ZoomOut className="h-3.5 w-3.5" />
+                          </button>
+                          <button onClick={() => setZoom(1)}
+                            className="h-7 w-14 text-[11px] font-mono text-muted hover:bg-line/5 hover:text-ink transition"
+                            title="Réinitialiser"
+                            style={{ borderLeft: "1px solid rgb(var(--line) / var(--line-a))", borderRight: "1px solid rgb(var(--line) / var(--line-a))" }}>
+                            {Math.round(zoom * 100)}%
+                          </button>
+                          <button onClick={zoomIn} disabled={zoom >= ZOOM_MAX}
+                            className="h-7 w-7 flex items-center justify-center text-muted hover:bg-line/5 hover:text-ink transition disabled:opacity-30"
+                            title="Zoom avant">
+                            <ZoomIn className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+
+                        {/* Regenerate - CL only */}
+                        {active.kind === "cl" && (
+                          <button onClick={handleRegenerate}
+                            className="btn-ghost ring-focus flex items-center gap-1.5 rounded-lg px-3 h-8 text-[12px] shrink-0">
+                            <RotateCcw className="h-3.5 w-3.5" />
+                            <span className="hidden sm:inline">Régénérer</span>
+                          </button>
+                        )}
+
+                        {/* Download */}
+                        <button onClick={handleDownload}
+                          className="btn-accent ring-focus flex items-center gap-1.5 rounded-lg px-3 h-8 text-[12px] font-medium shrink-0">
+                          <Download className="h-3.5 w-3.5" />
+                          <span className="hidden sm:inline">Télécharger</span>
+                        </button>
+                      </>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-[12px] text-subtle">Sélectionnez un document dans la liste</p>
+                )}
+              </div>
+
+              {/* Canvas viewport - dot grid, style Canva */}
+              <div
+                className="flex-1 overflow-auto"
+                style={{
+                  backgroundColor: "rgb(var(--well))",
+                  backgroundImage: "radial-gradient(circle, rgb(var(--line) / 0.25) 1.5px, transparent 1.5px)",
+                  backgroundSize: "24px 24px",
+                }}
+              >
+                {/* min-width:max-content pour scroll horizontal quand zoomé */}
+                <div
+                  className="relative flex flex-col items-center px-10 py-10"
+                  style={{ minWidth: "max-content", minHeight: "100%" }}
+                >
+
+                  {/* ── Empty ── */}
+                  {canvasState === "empty" && (
+                    <div className="flex items-center justify-center" style={{ minHeight: "calc(100vh - 56px - 48px)" }}>
+                      <EmptyCanvas />
+                    </div>
+                  )}
+
+                  {/* ── Loading ── */}
+                  {canvasState === "loading" && (
+                    <div className="flex flex-col items-center justify-center gap-3" style={{ minHeight: "calc(100vh - 56px - 48px)" }}>
+                      <div className="relative">
+                        <div className="h-14 w-14 rounded-2xl bg-accent/10 flex items-center justify-center">
+                          <Sparkles className="h-7 w-7 text-accent" />
+                        </div>
+                        <Loader2 className="absolute -bottom-1 -right-1 h-5 w-5 text-accent animate-spin" />
+                      </div>
+                      <div className="text-center">
+                        <p className="text-sm font-medium text-ink">
+                          {active?.kind === "cl" ? "Génération en cours…" : "Chargement…"}
+                        </p>
+                        <p className="text-xs text-muted mt-0.5">
+                          {active?.kind === "cl" ? "L'IA rédige votre lettre de motivation" : "Récupération du document"}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── Error ── */}
+                  {canvasState === "error" && active && (
+                    <div className="flex flex-col items-center justify-center gap-4 text-center" style={{ minHeight: "calc(100vh - 56px - 48px)" }}>
+                      <div className="h-14 w-14 rounded-2xl bg-red-500/10 flex items-center justify-center">
+                        <FileX className="h-7 w-7 text-red-400" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-ink mb-1">Chargement impossible</p>
+                        <p className="text-xs text-muted mb-2 max-w-xs">
+                          Vérifiez que l'analyse est terminée et réessayez.
+                        </p>
+                        {fetchError && (
+                          <p className="text-[10px] font-mono text-red-400 bg-red-500/8 border border-red-500/15 rounded px-2 py-1 max-w-xs break-all mb-3">
+                            {fetchError}
+                          </p>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => {
+                          if (active.kind === "cv") doLoad(active)
+                          else if (active.source === "application") selectDoc(active)
+                          else setCanvasState("pre-gen")
+                        }}
+                        className="btn-ghost ring-focus inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" /> Réessayer
+                      </button>
+                    </div>
+                  )}
+
+                  {/* ── PDF loaded - CV and application-sourced letters only, rendered via
+                       PDF.js to <canvas>, no browser viewer chrome ── */}
+                  {(canvasState === "loaded" || canvasState === "refine") && pdfUrl && (
+                    <PdfViewer url={pdfUrl} zoom={zoom} />
+                  )}
+                </div>
+              </div>
+            </>
+          )}
 
           {/* ── Refine panel - slides up from bottom over the canvas ── */}
           {canvasState === "refine" && active && (

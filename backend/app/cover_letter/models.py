@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, UniqueConstraint
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSON, UUID
 
 from app.db.session import Base
@@ -25,6 +25,9 @@ class AnalysisCoverLetter(Base):
     job_index = Column(Integer, nullable=False)
 
     content = Column(JSON, nullable=False)
+    # User's manually edited full letter body (salutation through sign-off). When set,
+    # this - not content's paragraphs - is what gets rendered into the downloaded PDF.
+    edited_body = Column(Text, nullable=True)
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

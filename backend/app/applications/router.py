@@ -3,8 +3,9 @@ import io
 import json
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.applications import service as applications_svc
@@ -19,11 +20,19 @@ from app.applications.schemas import (
     UpdateApplicationRequest,
 )
 from app.auth.dependencies import get_current_user
-from app.cover_letter.generator import CoverLetterContent, render_pdf
+from app.cover_letter.generator import CoverLetterContent, letter_html, render_pdf
 from app.db.session import get_db
 from app.logger import get_logger
 from app.users.models import User
 from app.worker.tasks import generate_application_cover_letter
+
+
+class ExportBodyRequest(BaseModel):
+    text: str
+
+
+class UpdateBodyRequest(BaseModel):
+    text: str
 
 logger = get_logger(__name__)
 
@@ -119,6 +128,77 @@ async def download_cover_letter(
             "X-Cover-Letter-Content": content_b64,
             "Access-Control-Expose-Headers": "X-Cover-Letter-Content",
         },
+    )
+
+
+@router.get(
+    "/{application_id}/cover-letter/body",
+    summary="Fetch the stored letter as JSON (content + editable body) - no PDF rendering",
+)
+async def get_cover_letter_body(
+    application_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    application = await applications_svc.get_application(db, application_id, current_user.id)
+    if not application:
+        raise HTTPException(status_code=404, detail="Application not found")
+    if not application.cover_letter_content:
+        raise HTTPException(status_code=404, detail="No cover letter generated yet for this application")
+
+    content = CoverLetterContent(**application.cover_letter_content)
+    return {
+        "content": application.cover_letter_content,
+        "body": application.edited_body or letter_html(content),
+    }
+
+
+@router.patch(
+    "/{application_id}/cover-letter/body",
+    summary="Save a manual edit of the letter body (overrides the AI-generated text on export)",
+)
+async def update_cover_letter_body(
+    application_id: UUID,
+    body: UpdateBodyRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    application = await applications_svc.get_application(db, application_id, current_user.id)
+    if not application:
+        raise HTTPException(status_code=404, detail="Application not found")
+
+    updated = await applications_svc.update_edited_body(db, application_id, body.text)
+    if not updated:
+        raise HTTPException(status_code=404, detail="No cover letter generated yet for this application")
+    return {"ok": True}
+
+
+@router.post(
+    "/{application_id}/cover-letter/export",
+    summary="Save the current editor text and render it to PDF via reportlab",
+    response_class=StreamingResponse,
+)
+async def export_cover_letter_pdf(
+    application_id: UUID,
+    body: ExportBodyRequest = Body(...),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    application = await applications_svc.get_application(db, application_id, current_user.id)
+    if not application:
+        raise HTTPException(status_code=404, detail="Application not found")
+
+    updated = await applications_svc.update_edited_body(db, application_id, body.text)
+    if not updated or not updated.cover_letter_content:
+        raise HTTPException(status_code=404, detail="No cover letter generated yet for this application")
+
+    content = CoverLetterContent(**updated.cover_letter_content)
+    pdf_bytes = render_pdf(content, body_text=body.text)
+
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="cover_letter.pdf"'},
     )
 
 

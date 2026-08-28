@@ -3,6 +3,7 @@ import { getLatestAnalysis, getCvData } from "../api/analysis"
 import { getPreferences } from "../api/users"
 import { listUsers, listAllAnalyses } from "../api/admin"
 import { listApplications } from "../api/applications"
+import { listCoverLetters } from "../api/apply"
 import { listNotifications, getUnreadCount as fetchUnreadCount } from "../api/notifications"
 
 // ─── Query keys (single source of truth for invalidation) ────────────────────
@@ -13,6 +14,7 @@ export const QK = {
   adminUsers:     ["admin", "users"] as const,
   adminAnalyses:  ["admin", "analyses"] as const,
   applications:   ["applications"]   as const,
+  coverLetters:   (analysisId: string) => ["coverLetters", analysisId] as const,
   notifications:      ["notifications"]        as const,
   notificationsUnread:["notifications", "unread"] as const,
 } as const
@@ -65,6 +67,15 @@ export function useApplications() {
   return useQuery({
     queryKey:  QK.applications,
     queryFn:   () => listApplications().then(r => r.data),
+    staleTime: 30 * 1000,
+  })
+}
+
+export function useCoverLetters(analysisId: string | undefined) {
+  return useQuery({
+    queryKey: QK.coverLetters(analysisId ?? ""),
+    queryFn:  () => listCoverLetters(analysisId as string),
+    enabled:  !!analysisId,
     staleTime: 30 * 1000,
   })
 }

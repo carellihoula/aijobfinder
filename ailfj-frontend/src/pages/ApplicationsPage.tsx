@@ -20,6 +20,7 @@ import {
   FileText,
   Eye,
   Info,
+  CheckCircle2,
 } from "lucide-react";
 import Layout from "../components/Layout";
 import {
@@ -500,13 +501,16 @@ function AddApplicationPanel({
 
         {phase === "ready" && pdfUrl && (
           <div className="flex flex-1 min-h-0">
-            <div className="flex-1 bg-canvas">
-              <iframe
-                src={pdfUrl}
-                title="Lettre de motivation"
-                className="w-full h-full border-0"
-                style={{ minHeight: 400 }}
-              />
+            <div className="flex-1 bg-canvas flex flex-col items-center justify-center gap-3 text-center px-8">
+              <div className="h-12 w-12 rounded-2xl bg-accent/10 flex items-center justify-center">
+                <CheckCircle2 className="h-6 w-6 text-accent" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-ink">Lettre générée</p>
+                <p className="text-xs text-muted mt-1 max-w-xs">
+                  Téléchargez-la ou demandez des ajustements avant de l'ajouter à vos candidatures.
+                </p>
+              </div>
             </div>
             <div
               className="w-65 shrink-0 p-4 flex flex-col gap-3 overflow-y-auto"

@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     ADMIN_EMAILS: str = ""
 
     OPENAI_API_KEY: str = ""
-    OPENAI_MODEL: str = "gpt-5-nano"
+    OPENAI_MODEL: str = "gpt-5.6-luna"
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
 
     CORTEX_DATABASE_URL: str = ""  # postgresql+asyncpg://user:pass@host:5432/postgres

@@ -94,18 +94,63 @@ export const pollApplication = async (
   }
 }
 
-/** Documents page helper: fetches the already-generated PDF, or - when a suggestion is
- * given - refines it first (enqueues Celery, polls, then fetches the new PDF). */
-export const fetchOrRefineApplicationCoverLetter = async (
+// ── Editor-first flow: content lives in SimpleEditor, PDF only exists on export ──
+
+export interface CoverLetterJson {
+  content: Record<string, unknown>
+  body: string
+}
+
+/** Fetches the stored letter as JSON - no PDF rendering. Returns null on 404. */
+export const getApplicationCoverLetterBody = async (
+  applicationId: string,
+): Promise<CoverLetterJson | null> => {
+  try {
+    const { data } = await client.get<CoverLetterJson>(`/applications/${applicationId}/cover-letter/body`)
+    return data
+  } catch (e: unknown) {
+    const status = (e as { response?: { status?: number } })?.response?.status
+    if (status === 404) return null
+    throw e
+  }
+}
+
+/** Saves a manual edit of the letter body - the next export will use this text
+ * instead of the AI-generated paragraphs. */
+export const updateApplicationCoverLetterBody = (applicationId: string, text: string) =>
+  client.patch(`/applications/${applicationId}/cover-letter/body`, { text })
+
+/** Enqueues an AI refine (Celery), polls until it settles, then returns the fresh
+ * letter as JSON - no PDF involved, straight into the editor. */
+export const generateApplicationCoverLetterJson = async (
   applicationId: string,
   suggestion = "",
-): Promise<CoverLetterPdf> => {
-  if (suggestion.trim()) {
-    await refineCoverLetter(applicationId, suggestion)
-    const result = await pollApplication(applicationId)
-    if (result.cover_letter_status !== "completed") {
-      throw new Error("La génération a échoué - réessayez.")
-    }
+): Promise<CoverLetterJson> => {
+  await refineCoverLetter(applicationId, suggestion)
+  const result = await pollApplication(applicationId)
+  if (result.cover_letter_status !== "completed") {
+    throw new Error("La génération a échoué - réessayez.")
   }
-  return fetchApplicationCoverLetterPdf(applicationId)
+  const body = await getApplicationCoverLetterBody(applicationId)
+  if (!body) throw new Error("La lettre générée est introuvable.")
+  return body
+}
+
+/** Saves the current editor text and renders it to PDF via reportlab - the only
+ * point in this flow where a PDF is ever produced. */
+export const exportApplicationCoverLetterPdf = async (
+  applicationId: string,
+  text: string,
+): Promise<Blob> => {
+  const res = await fetch(`/api/applications/${applicationId}/cover-letter/export`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  })
+  if (!res.ok) {
+    const detail = await res.json().then((d) => d?.detail).catch(() => res.statusText)
+    throw new Error(`HTTP ${res.status} - ${detail}`)
+  }
+  return res.blob()
 }

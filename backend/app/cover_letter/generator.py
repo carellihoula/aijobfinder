@@ -1,4 +1,5 @@
 from datetime import datetime
+from html import escape
 from typing import Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -178,10 +179,50 @@ async def generate_cover_letter(
     return content
 
 
-def render_pdf(content: CoverLetterContent) -> bytes:
+def render_pdf(content: CoverLetterContent, body_text: str | None = None) -> bytes:
+    """If body_text is given, it replaces the salutation/paragraphs/closing/sign-off
+    block (the user's manually edited version) - the header (sender, recipient,
+    date, subject) still comes from content, unchanged."""
     from app.cover_letter.backends.reportlab_backend import render
 
-    return render(content)
+    return render(content, body_text=body_text)
+
+
+def letter_body_text(content: CoverLetterContent) -> str:
+    """The editable "body" of the letter: salutation through sign-off, as a single
+    blank-line-separated text block - used only by the legacy PDF-returning endpoints."""
+    parts = [content.salutation]
+    parts += [p.text for p in content.paragraphs]
+    parts.append(content.closing)
+    parts.append(content.sign_off)
+    return "\n\n".join(parts)
+
+
+def letter_html(content: CoverLetterContent) -> str:
+    """Full letter (header + body) as semantic HTML, deterministically templated from
+    the structured content - not written by the LLM. Fed straight into SimpleEditor,
+    which parses it into real formatting (bold name, right-aligned date, etc.), not
+    literal tags, so the letter looks correct from the first AI generation onward."""
+    def esc(text: str) -> str:
+        return escape(text or "")
+
+    contact_parts = [p for p in [content.sender.email, content.sender.phone, content.sender.location] if p]
+    contact_line = "  ·  ".join(esc(p) for p in contact_parts)
+
+    parts = [
+        f"<p><strong>{esc(content.sender.full_name.upper())}</strong>"
+        + (f"<br>{contact_line}</p>" if contact_line else "</p>"),
+        "<hr>",
+        f'<p style="text-align: right">{esc(content.city_date)}</p>',
+        f"<p>{esc(content.recipient.company_name)}<br>{esc(content.recipient.contact)}</p>",
+        f"<p><strong>Objet :</strong> {esc(content.subject)}</p>",
+        f'<p style="text-align: justify">{esc(content.salutation)}</p>',
+    ]
+    parts += [f'<p style="text-align: justify">{esc(p.text)}</p>' for p in content.paragraphs]
+    parts.append(f'<p style="text-align: justify">{esc(content.closing)}</p>')
+    parts.append(f'<p style="text-align: justify">{esc(content.sign_off)}</p>')
+
+    return "".join(parts)
 
 
 # ── Input formatters (for the LLM prompt only) ────────────────────────────────

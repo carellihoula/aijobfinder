@@ -31,6 +31,7 @@ class Application(Base):
 
     cover_letter_status = Column(String, default="pending", nullable=False)
     cover_letter_content = Column(JSON, nullable=True)  # rendered CoverLetterContent, once generation completes
+    edited_body = Column(Text, nullable=True)  # user's manual edit of the letter body, overrides content-derived text
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

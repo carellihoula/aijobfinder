@@ -58,11 +58,8 @@ alembic/versions/*.pyc
 .aws/
 aws-credentials
 
-# WeasyPrint
+# Generated PDF output (WeasyPrint/ReportLab) - not source code
 *.pdf
-
-# ReportLab
-reportlab_*
 
 # Local scratch / notes files
 presigned.txt

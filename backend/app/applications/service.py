@@ -61,7 +61,20 @@ async def set_cover_letter_result(
         return
     application.cover_letter_status = status
     application.cover_letter_content = content
+    if status == "completed":
+        application.edited_body = None  # a fresh AI generation supersedes any manual edit
     await db.commit()
+
+
+async def update_edited_body(db: AsyncSession, application_id: UUID, text: str) -> Application | None:
+    result = await db.execute(select(Application).where(Application.id == application_id))
+    application = result.scalar_one_or_none()
+    if not application:
+        return None
+    application.edited_body = text
+    await db.commit()
+    await db.refresh(application)
+    return application
 
 
 async def list_applications_for_user(db: AsyncSession, user_id: UUID) -> list[Application]:
