@@ -16,6 +16,7 @@ import app.cv.models      # noqa: F401
 import app.analysis.models  # noqa: F401
 import app.applications.models  # noqa: F401
 import app.notifications.models  # noqa: F401
+import app.cover_letter.models  # noqa: F401
 
 config = context.config
 

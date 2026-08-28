@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.analysis.service import get_analysis
 from app.auth.dependencies import get_current_user
+from app.cover_letter import service as cover_letter_svc
 from app.cover_letter.generator import CoverLetterContent, generate_cover_letter, render_pdf
 from app.cv.service import get_cv
 from app.db.session import get_db
@@ -67,6 +68,46 @@ async def download_cv(
     )
 
 
+def _content_headers(content: CoverLetterContent) -> dict:
+    company_slug = (content.recipient.company_name or "company").replace(" ", "_").lower()
+    # base64-encode to avoid header encoding issues with French characters.
+    content_b64 = base64.b64encode(json.dumps(content.model_dump()).encode()).decode()
+    return {
+        "Content-Disposition": f'inline; filename="cover_letter_{company_slug}.pdf"',
+        "X-Cover-Letter-Content": content_b64,
+        "Access-Control-Expose-Headers": "X-Cover-Letter-Content",
+    }
+
+
+@router.get(
+    "/{analysis_id}/cover-letter",
+    summary="Fetch a previously generated cover letter without regenerating it",
+    response_class=StreamingResponse,
+)
+async def get_cover_letter(
+    analysis_id: UUID,
+    job_index: int = Query(0, ge=0, description="Index of the job in the matches list"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    analysis = await get_analysis(db, analysis_id, current_user.id)
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+
+    stored = await cover_letter_svc.get_cover_letter(db, analysis_id, job_index)
+    if not stored:
+        raise HTTPException(status_code=404, detail="No cover letter generated yet for this offer")
+
+    content = CoverLetterContent(**stored.content)
+    pdf_bytes = render_pdf(content)
+
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers=_content_headers(content),
+    )
+
+
 @router.post(
     "/{analysis_id}/cover-letter",
     summary="Generate or refine a PDF cover letter for a matched job",
@@ -83,29 +124,29 @@ async def create_cover_letter(
         db, analysis_id, current_user.id, job_index
     )
 
+    # Fall back to the DB-persisted content for refinement continuity when the
+    # frontend doesn't have it locally (new device, cleared cache, ...).
+    previous_content = body.previous_content
+    if previous_content is None:
+        stored = await cover_letter_svc.get_cover_letter(db, analysis_id, job_index)
+        if stored:
+            previous_content = stored.content
+
     gender = (current_user.preferences or {}).get("gender", "") if current_user.preferences else ""
     content: CoverLetterContent = await generate_cover_letter(
         cv_data, job,
         suggestion=body.suggestion,
-        previous_content=body.previous_content,
+        previous_content=previous_content,
         gender=gender,
     )
     pdf_bytes = render_pdf(content)
 
-    company_slug = (content.recipient.company_name or "company").replace(" ", "_").lower()
-
-    # Return the structured content as a header so the frontend can cache it for future refinements.
-    # base64-encode to avoid header encoding issues with French characters.
-    content_b64 = base64.b64encode(json.dumps(content.model_dump()).encode()).decode()
+    await cover_letter_svc.upsert_cover_letter(db, analysis_id, job_index, content.model_dump())
 
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
         media_type="application/pdf",
-        headers={
-            "Content-Disposition": f'inline; filename="cover_letter_{company_slug}.pdf"',
-            "X-Cover-Letter-Content": content_b64,
-            "Access-Control-Expose-Headers": "X-Cover-Letter-Content",
-        },
+        headers=_content_headers(content),
     )
 
 

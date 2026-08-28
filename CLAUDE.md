@@ -107,6 +107,17 @@ Or via Docker Compose from the repo root (`docker-compose.yml`): `docker compose
 - `CORTEX_DATABASE_URL` uses `postgresql+asyncpg://` on port `5432`
 - Tables created automatically on startup via `init_db()` and `init_cortex()`
 
+### 🗄️ Database management (SQLAlchemy & Alembic)
+
+#### Golden rule
+NEVER hand-write Alembic migration files, and don't create one migration per table. Let Alembic handle it via autogenerate.
+
+#### Workflow to follow strictly:
+1. **Model design**: when asked to create or modify tables, write ALL the required code only in the SQLAlchemy model files (e.g. `models.py`). Always group tables belonging to the same feature in the same block of code.
+2. **No Alembic code**: never hand over code using `op.create_table`, `op.add_column`, or raw Alembic revision syntax.
+
+Practical note for `--autogenerate` to actually work (otherwise it generates an empty file): `alembic/env.py` must import every model module, and the command must run **before** restarting `api`/the Celery workers - otherwise `init_db()`'s `create_all()` will have already created the table on startup, leaving nothing for Alembic to diff.
+
 ---
 
 ## Frontend (`ailfj-frontend/`)

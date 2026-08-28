@@ -60,6 +60,34 @@ export const fetchCoverLetterPdfBlob = async (
   return { blob, content }
 }
 
+/** Fetches a previously generated cover letter without regenerating it. Returns
+ * null on 404 (nothing generated yet for this offer) - the durable server-side
+ * counterpart to the localStorage cache, so a cover letter survives a cleared
+ * cache or a different device. */
+export const fetchExistingCoverLetterPdfBlob = async (
+  analysisId: string,
+  jobIndex: number,
+): Promise<CoverLetterResult | null> => {
+  const params = new URLSearchParams({ job_index: String(jobIndex) })
+  const res = await fetch(`/api/analysis/${analysisId}/cover-letter?${params}`, {
+    credentials: "include",
+  })
+  if (res.status === 404) return null
+  if (!res.ok) {
+    const detail = await res.json().then((d) => d?.detail).catch(() => res.statusText)
+    throw new Error(`HTTP ${res.status} - ${detail}`)
+  }
+
+  const blob = await res.blob()
+  let content: Record<string, unknown> | null = null
+  const contentB64 = res.headers.get("X-Cover-Letter-Content")
+  if (contentB64) {
+    try { content = JSON.parse(atob(contentB64)) } catch { /* ignore */ }
+  }
+
+  return { blob, content }
+}
+
 /** Returns a blob URL - use with an <iframe> or <a download> */
 export const fetchCoverLetterPdf = async (
   analysisId: string,

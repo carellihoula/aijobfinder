@@ -2,6 +2,7 @@ import { scopedKey } from "./storageKey"
 
 const PDF_PREFIX     = "cl_pdf_"
 const CONTENT_PREFIX = "cl_content_"
+const TIME_PREFIX    = "cl_time_"
 const MAX_ENTRIES    = 20
 
 function key(prefix: string, analysisId: string, jobIndex: number) {
@@ -36,7 +37,14 @@ export async function cacheCL(analysisId: string, jobIndex: number, blob: Blob) 
     const existing = Object.keys(localStorage).filter((k) => k.startsWith(userPdfPrefix))
     if (existing.length >= MAX_ENTRIES) localStorage.removeItem(existing[0])
     localStorage.setItem(key(PDF_PREFIX, analysisId, jobIndex), dataUrl)
+    localStorage.setItem(key(TIME_PREFIX, analysisId, jobIndex), String(Date.now()))
   } catch { /* quota or encoding error - skip silently */ }
+}
+
+/** Returns the timestamp (ms) this cover letter was last generated/fetched, or null. */
+export function getCachedCLTimestamp(analysisId: string, jobIndex: number): number | null {
+  const raw = localStorage.getItem(key(TIME_PREFIX, analysisId, jobIndex))
+  return raw ? Number(raw) : null
 }
 
 /** Returns a fresh blob URL from the cache, or null on miss. */
@@ -66,6 +74,7 @@ export function getCachedCLContent(analysisId: string, jobIndex: number): Record
 export function clearCachedCL(analysisId: string, jobIndex: number) {
   localStorage.removeItem(key(PDF_PREFIX, analysisId, jobIndex))
   localStorage.removeItem(key(CONTENT_PREFIX, analysisId, jobIndex))
+  localStorage.removeItem(key(TIME_PREFIX, analysisId, jobIndex))
 }
 
 /** True if a cover letter PDF is cached for this analysisId + jobIndex. */
