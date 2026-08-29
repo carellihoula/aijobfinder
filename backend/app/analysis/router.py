@@ -123,8 +123,11 @@ async def launch_search(
                 wait_h = round((_PIPELINE_COOLDOWN - age) / 3600, 1)
                 raise HTTPException(
                     status_code=429,
-                    detail=f"Rate limit: next search available in {wait_h}h. "
-                           "Your results are refreshed automatically every night.",
+                    detail={
+                        "message": f"Rate limit: next search available in {wait_h}h. "
+                                   "Your results are refreshed automatically every night.",
+                        "wait_hours": wait_h,
+                    },
                 )
 
     await deactivate_user_analyses(db, current_user.id)

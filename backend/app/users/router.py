@@ -143,6 +143,8 @@ async def change_password(
     db: AsyncSession = Depends(get_db),
 ):
     """Change password after verifying the current one."""
+    if not current_user.hashed_password:
+        raise HTTPException(status_code=400, detail="This account signs in with Google and has no password to change")
     if not verify_password(payload.current_password, current_user.hashed_password):
         raise HTTPException(status_code=400, detail="Current password is incorrect")
     if len(payload.new_password) < 8:

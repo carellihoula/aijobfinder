@@ -13,13 +13,22 @@ class User(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     email = Column(String, unique=True, index=True, nullable=False)
-    hashed_password = Column(String, nullable=False)
+    # Nullable - accounts created via Google OIDC have no password at all.
+    hashed_password = Column(String, nullable=True)
     full_name = Column(String, nullable=True)
     is_active    = Column(Boolean, default=True)
     is_admin     = Column(Boolean, default=False, nullable=False)
     is_verified  = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     preferences = Column(JSON, nullable=True)
-    avatar_key  = Column(String, nullable=True)
+    avatar_key  = Column(String, nullable=True)  # self-hosted avatar, S3 object key
+
+    # Google OIDC
+    google_id  = Column(String, unique=True, index=True, nullable=True)
+    avatar_url = Column(String, nullable=True)  # Google-provided profile picture URL
 
     analyses = relationship("Analysis", back_populates="user", cascade="all, delete-orphan")
+
+    @property
+    def has_password(self) -> bool:
+        return self.hashed_password is not None

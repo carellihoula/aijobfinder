@@ -13,5 +13,7 @@ class UserResponse(BaseModel):
     is_verified: bool
     created_at: datetime
     avatar_key: str | None = None
+    avatar_url: str | None = None  # Google-provided profile picture, when no avatar_key is set
+    has_password: bool = False     # false for Google-only accounts - hides "change password" UI
 
     model_config = {"from_attributes": True}

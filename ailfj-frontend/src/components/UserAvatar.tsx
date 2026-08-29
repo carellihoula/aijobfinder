@@ -3,6 +3,9 @@ import { User } from "lucide-react"
 
 interface Props {
   avatarKey: string | null | undefined
+  // Google-provided profile picture - only used when there's no self-hosted
+  // avatarKey (a manual upload always takes priority).
+  avatarUrl?: string | null
   name?: string | null
   size?: number   // tailwind size number, default 8 (= 2rem)
   className?: string
@@ -24,7 +27,7 @@ export function clearAvatarCache(key?: string) {
   }
 }
 
-export default function UserAvatar({ avatarKey, name, size = 8, className = "" }: Props) {
+export default function UserAvatar({ avatarKey, avatarUrl, name, size = 8, className = "" }: Props) {
   const [blobUrl, setBlobUrl] = useState<string | null>(
     avatarKey ? (blobCache.get(avatarKey) ?? null) : null
   )
@@ -62,6 +65,17 @@ export default function UserAvatar({ avatarKey, name, size = 8, className = "" }
       <img
         src={blobUrl}
         alt="Avatar"
+        className={`${sz} rounded-full object-cover shrink-0 ${className}`}
+      />
+    )
+  }
+
+  if (!avatarKey && avatarUrl) {
+    return (
+      <img
+        src={avatarUrl}
+        alt="Avatar"
+        referrerPolicy="no-referrer"
         className={`${sz} rounded-full object-cover shrink-0 ${className}`}
       />
     )

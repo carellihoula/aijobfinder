@@ -19,6 +19,20 @@ export function useAuth() {
     }
   }
 
+  const googleLogin = async (idToken: string): Promise<{ isNewUser: boolean } | false> => {
+    setLoading(true)
+    setError(null)
+    try {
+      const { data } = await authApi.googleAuth(idToken)
+      return { isNewUser: data.is_new_user }
+    } catch {
+      setError('La connexion avec Google a échoué')
+      return false
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const registerUser = async (email: string, password: string, fullName: string) => {
     setLoading(true)
     setError(null)
@@ -38,5 +52,5 @@ export function useAuth() {
     window.location.href = '/login'
   }
 
-  return { loading, error, loginUser, registerUser, logout }
+  return { loading, error, loginUser, googleLogin, registerUser, logout }
 }

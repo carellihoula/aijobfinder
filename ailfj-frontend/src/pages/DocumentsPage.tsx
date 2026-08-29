@@ -18,7 +18,6 @@ import {
   getApplicationCoverLetterBody, generateApplicationCoverLetterJson,
   exportApplicationCoverLetterPdf, updateApplicationCoverLetterBody,
 } from "../api/applications"
-import { getSavedJobs, unsaveJob } from "../lib/savedJobs"
 import { getHiddenApplicationIds, hideApplication, unhideApplication } from "../lib/hiddenApplications"
 
 // PDF.js worker - renders PDF to <canvas>, no browser native viewer, no black borders
@@ -106,15 +105,16 @@ export default function DocumentsPage() {
   const { data: coverLetters = [] } = useCoverLetters(latestAnalysis?.id)
   const { data: applications = [] } = useApplications()
 
-  // ── Build doc list when analysis is available - merges bookmarked jobs with
-  // every offer that already has a generated letter, so the list (and the
-  // letters themselves) survive a page refresh instead of only existing for the
-  // duration of one query-param navigation. ────────────────────────────────────
+  // ── Build doc list when analysis is available - merges the offer just opened
+  // via "Préparer ma candidature" with every offer that already has a generated
+  // letter, so the list (and the letters themselves) survive a page refresh.
+  // Bookmarked-but-never-generated offers deliberately do NOT show up here -
+  // only "Préparer ma candidature" (from the match card's modal) adds an offer
+  // to Documents. ──────────────────────────────────────────────────────────────
 
   useEffect(() => {
     if (!latestAnalysis) return
     const id    = latestAnalysis.id
-    const saved = getSavedJobs()
     const seenJobIndexes = new Set<number>()
 
     const items: DocItem[] = [
@@ -135,20 +135,6 @@ export default function DocumentsPage() {
       }
       items.push(fromOffer)
       seenJobIndexes.add(idx)
-    }
-
-    for (const j of saved.slice(0, 20)) {
-      if (seenJobIndexes.has(j.originalIndex)) continue
-      seenJobIndexes.add(j.originalIndex)
-      items.push({
-        id: `cl-${j.id}`,
-        kind: "cl",
-        label: `Lettre - ${j.company}`,
-        sub: j.title,
-        source: "analysis",
-        analysisId: j.analysisId,
-        jobIndex: j.originalIndex,
-      })
     }
 
     for (const letter of coverLetters) {
@@ -361,18 +347,10 @@ export default function DocumentsPage() {
   }
 
   function handleRemoveDoc(doc: DocItem) {
-    // Unsave the job if it came from saved jobs
-    const savedJob = getSavedJobs().find(
-      (j) => j.analysisId === doc.analysisId && j.originalIndex === doc.jobIndex
-    )
-    if (savedJob) unsaveJob(savedJob.id)
-
     letterCacheRef.current.delete(doc.id)
     // Remove from local list immediately (optimistic).
     setDocs((prev) => prev.filter((d) => d.id !== doc.id))
     if (doc.source === "analysis" && doc.jobIndex !== undefined) {
-      // Real DB delete - a bookmarked-but-not-yet-generated offer just gets
-      // un-bookmarked above, nothing to delete server side.
       deleteCoverLetter(doc.analysisId, doc.jobIndex)
         .then(() => queryClient.invalidateQueries({ queryKey: QK.coverLetters(doc.analysisId) }))
         .catch(() => { /* best-effort - a stale refetch would just re-add it */ })

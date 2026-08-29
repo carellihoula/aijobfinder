@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
+import { GoogleLogin } from '@react-oauth/google'
 import { useAuth } from '../hooks/useAuth'
 import { useUser } from '../lib/userContext'
 
@@ -7,7 +8,7 @@ export default function RegisterPage() {
   const [email, setEmail]       = useState('')
   const [password, setPassword] = useState('')
   const [fullName, setFullName] = useState('')
-  const { registerUser, loading, error } = useAuth()
+  const { registerUser, googleLogin, loading, error } = useAuth()
   const { refetchMe } = useUser()
   const navigate = useNavigate()
 
@@ -17,6 +18,17 @@ export default function RegisterPage() {
     if (ok) {
       await refetchMe()
       navigate('/setup')
+    }
+  }
+
+  const handleGoogleSuccess = async (credential?: string) => {
+    if (!credential) return
+    const result = await googleLogin(credential)
+    if (result) {
+      await refetchMe()
+      // Someone with an existing account may still click Google here by mistake -
+      // only a genuinely new signup needs onboarding.
+      navigate(result.isNewUser ? '/setup' : '/dashboard')
     }
   }
 
@@ -37,6 +49,19 @@ export default function RegisterPage() {
           </div>
           <h1 className="text-2xl font-semibold text-ink tracking-tight">Créer un compte</h1>
           <p className="mt-1 text-sm text-muted">Configurez votre profil en quelques étapes</p>
+        </div>
+
+        <div className="mb-5 flex justify-center">
+          <GoogleLogin
+            onSuccess={(cred) => handleGoogleSuccess(cred.credential)}
+            onError={() => {}}
+          />
+        </div>
+
+        <div className="flex items-center gap-3 mb-5">
+          <div className="flex-1 h-px bg-line/15" />
+          <span className="text-xs text-subtle">ou</span>
+          <div className="flex-1 h-px bg-line/15" />
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">

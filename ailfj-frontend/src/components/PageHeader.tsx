@@ -57,7 +57,7 @@ export default function PageHeader({ title, subtitle, actions }: Props) {
           onClick={() => setMenuOpen((v) => !v)}
           className="rounded-full hover:opacity-80 transition focus:outline-none focus:ring-2 focus:ring-accent/40"
         >
-          <UserAvatar avatarKey={me?.avatar_key} name={me?.full_name || me?.email} size={8} />
+          <UserAvatar avatarKey={me?.avatar_key} avatarUrl={me?.avatar_url} name={me?.full_name || me?.email} size={8} />
         </button>
 
         {menuOpen && (

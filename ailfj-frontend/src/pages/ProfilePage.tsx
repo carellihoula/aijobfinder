@@ -478,7 +478,11 @@ function LanguageEditor({ languages, onChange }: {
 
 // ─── Authenticated avatar image ───────────────────────────────────────────────
 // <img> doesn't send the Authorization header - fetch manually and use a blob URL.
-function AuthAvatar({ avatarKey, className }: { avatarKey: string | null | undefined; className?: string }) {
+function AuthAvatar({ avatarKey, avatarUrl, className }: {
+  avatarKey: string | null | undefined
+  avatarUrl?: string | null
+  className?: string
+}) {
   const [blobUrl, setBlobUrl] = useState<string | null>(
     avatarKey ? (blobCache.get(avatarKey) ?? null) : null
   )
@@ -501,8 +505,12 @@ function AuthAvatar({ avatarKey, className }: { avatarKey: string | null | undef
     return () => { active = false }
   }, [avatarKey])
 
-  if (!blobUrl) return null
-  return <img src={blobUrl} alt="Avatar" className={className} />
+  if (blobUrl) return <img src={blobUrl} alt="Avatar" className={className} />
+  // No self-hosted upload - fall back to the Google-provided picture, if any.
+  if (!avatarKey && avatarUrl) {
+    return <img src={avatarUrl} alt="Avatar" referrerPolicy="no-referrer" className={className} />
+  }
+  return null
 }
 
 // ─── CV re-upload modal ───────────────────────────────────────────────────────
@@ -625,7 +633,7 @@ function OverviewPane({
               title="Changer la photo"
             >
               {hasAvatar ? (
-                <AuthAvatar avatarKey={me?.avatar_key} className="h-full w-full object-cover" />
+                <AuthAvatar avatarKey={me?.avatar_key} avatarUrl={me?.avatar_url} className="h-full w-full object-cover" />
               ) : (
                 <div className="h-full w-full bg-accent/15 flex items-center justify-center text-accent text-xl font-bold select-none">
                   {initials}
@@ -649,7 +657,9 @@ function OverviewPane({
               {avatarUploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
               {avatarUploading ? "Envoi…" : "Téléverser une photo"}
             </button>
-            {hasAvatar && (
+            {/* Only a self-hosted upload can actually be deleted server-side - a
+                Google-provided picture with no upload has nothing to remove. */}
+            {!!me?.avatar_key && (
               <button
                 onClick={onAvatarDelete}
                 disabled={avatarUploading}
@@ -1371,7 +1381,7 @@ export default function ProfilePage() {
   // Avatar state
   const avatarInputRef = useRef<HTMLInputElement>(null)
   const [avatarUploading, setAvatarUploading] = useState(false)
-  const hasAvatar = !!me?.avatar_key
+  const hasAvatar = !!me?.avatar_key || !!me?.avatar_url
 
   const displayName = me?.full_name || me?.email || "-"
 
@@ -1582,7 +1592,7 @@ export default function ProfilePage() {
               title="Changer la photo"
             >
               {hasAvatar ? (
-                <AuthAvatar avatarKey={me?.avatar_key} className="h-full w-full object-cover" />
+                <AuthAvatar avatarKey={me?.avatar_key} avatarUrl={me?.avatar_url} className="h-full w-full object-cover" />
               ) : (
                 <div className="h-full w-full bg-accent/15 flex items-center justify-center text-accent text-xl font-bold select-none">
                   {displayName !== "-" ? displayName[0].toUpperCase() : <User className="h-6 w-6" />}
@@ -1595,8 +1605,9 @@ export default function ProfilePage() {
                   : <Camera className="h-5 w-5 text-white" />}
               </div>
             </button>
-            {/* Delete button - only shown when avatar exists */}
-            {hasAvatar && !avatarUploading && (
+            {/* Delete button - only for a self-hosted upload; nothing to remove
+                for a Google-provided picture with no upload of its own */}
+            {!!me?.avatar_key && !avatarUploading && (
               <button
                 onClick={handleAvatarDelete}
                 title="Supprimer la photo"

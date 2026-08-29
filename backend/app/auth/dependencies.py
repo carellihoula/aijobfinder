@@ -16,7 +16,7 @@ async def get_current_user(
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
     payload = decode_token(token)
-    if not payload:
+    if not payload or payload.get("type") != "access":
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
     user = await get_user_by_id(db, UUID(payload["sub"]))

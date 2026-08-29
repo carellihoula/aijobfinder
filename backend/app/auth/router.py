@@ -1,11 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import service
 from app.auth.dependencies import get_current_user
-from app.auth.schemas import LoginRequest, RegisterRequest
-from app.auth.utils import create_typed_token, decode_typed_token, hash_password
+from app.auth.schemas import GoogleAuthRequest, LoginRequest, RegisterRequest
+from app.auth.utils import create_access_token, create_typed_token, decode_typed_token, hash_password
 from app.config import settings
 from app.db.session import get_db
 from app.email import send_reset_email, send_verification_email
@@ -14,39 +14,90 @@ from app.users.service import get_user_by_email, update_user_password, verify_us
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
-_COOKIE_NAME = "token"
-_COOKIE_MAX_AGE = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
+_ACCESS_COOKIE  = "token"
+_REFRESH_COOKIE = "refresh_token"
 
 
-def _set_auth_cookie(response: Response, token: str) -> None:
+def _set_access_cookie(response: Response, token: str) -> None:
     response.set_cookie(
-        key=_COOKIE_NAME,
+        key=_ACCESS_COOKIE,
         value=token,
         httponly=True,
         secure=not settings.DEBUG,
         samesite="lax",
-        max_age=_COOKIE_MAX_AGE,
+        max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         path="/",
     )
 
 
+def _set_refresh_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        key=_REFRESH_COOKIE,
+        value=token,
+        httponly=True,
+        secure=not settings.DEBUG,
+        samesite="lax",
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        # Only sent back to /auth/* (refresh, logout) - never exposed to every
+        # other request, unlike the access token.
+        path="/auth",
+    )
+
+
+async def _issue_tokens(response: Response, db: AsyncSession, user: User) -> None:
+    access_token = create_access_token({"sub": str(user.id)})
+    refresh_token = await service.issue_refresh_token(db, user.id)
+    _set_access_cookie(response, access_token)
+    _set_refresh_cookie(response, refresh_token)
+
+
 @router.post("/register", status_code=201)
 async def register(data: RegisterRequest, response: Response, db: AsyncSession = Depends(get_db)):
-    token = await service.register(db, data)
-    _set_auth_cookie(response, token)
+    user = await service.register(db, data)
+    await _issue_tokens(response, db, user)
     return {"ok": True}
 
 
 @router.post("/login")
 async def login(data: LoginRequest, response: Response, db: AsyncSession = Depends(get_db)):
-    token = await service.login(db, data)
-    _set_auth_cookie(response, token)
+    user = await service.login(db, data)
+    await _issue_tokens(response, db, user)
+    return {"ok": True}
+
+
+@router.post("/google")
+async def google_auth(data: GoogleAuthRequest, response: Response, db: AsyncSession = Depends(get_db)):
+    user, is_new_user = await service.google_login(db, data.id_token)
+    await _issue_tokens(response, db, user)
+    return {"ok": True, "is_new_user": is_new_user}
+
+
+@router.post("/refresh")
+async def refresh(request: Request, response: Response, db: AsyncSession = Depends(get_db)):
+    raw_token = request.cookies.get(_REFRESH_COOKIE)
+    if not raw_token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    result = await service.rotate_refresh_token(db, raw_token)
+    if not result:
+        response.delete_cookie(key=_ACCESS_COOKIE, path="/")
+        response.delete_cookie(key=_REFRESH_COOKIE, path="/auth")
+        raise HTTPException(status_code=401, detail="Session expired - please log in again")
+
+    new_refresh_token, user_id = result
+    access_token = create_access_token({"sub": str(user_id)})
+    _set_access_cookie(response, access_token)
+    _set_refresh_cookie(response, new_refresh_token)
     return {"ok": True}
 
 
 @router.post("/logout")
-async def logout(response: Response):
-    response.delete_cookie(key=_COOKIE_NAME, path="/")
+async def logout(request: Request, response: Response, db: AsyncSession = Depends(get_db)):
+    raw_token = request.cookies.get(_REFRESH_COOKIE)
+    if raw_token:
+        await service.revoke_refresh_token(db, raw_token)
+    response.delete_cookie(key=_ACCESS_COOKIE, path="/")
+    response.delete_cookie(key=_REFRESH_COOKIE, path="/auth")
     return {"ok": True}
 
 

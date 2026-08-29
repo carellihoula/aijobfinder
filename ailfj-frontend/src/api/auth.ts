@@ -6,6 +6,9 @@ export const register = (email: string, password: string, full_name?: string) =>
 export const login = (email: string, password: string) =>
   client.post<{ ok: boolean }>('/auth/login', { email, password })
 
+export const googleAuth = (idToken: string) =>
+  client.post<{ ok: boolean; is_new_user: boolean }>('/auth/google', { id_token: idToken })
+
 export const logout = () => client.post('/auth/logout')
 
 export const forgotPassword = (email: string) =>
@@ -29,6 +32,8 @@ export interface MeResponse {
   is_verified: boolean
   created_at: string
   avatar_key: string | null
+  avatar_url: string | null
+  has_password: boolean
 }
 
 export const getMe = () => client.get<MeResponse>('/users/me')

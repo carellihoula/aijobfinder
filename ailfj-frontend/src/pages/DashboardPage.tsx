@@ -144,23 +144,21 @@ function AnalysisHeader({ analysis }: { analysis: Analysis }) {
 }
 
 // ─── No-search CTA ───────────────────────────────────────────────────────────
-const RL_KEY = "ailfj_search_rl_at"
-
+// The 24h cooldown is enforced server-side, per user, against Analysis.created_at
+// (see POST /analysis/search) - nothing about it is ever persisted client-side,
+// so there's nothing here to leak across accounts on the same browser or to tamper
+// with. `rateLimitHours` only ever reflects a 429 this session's own request hit.
 function NoSearchCTA({
-  onLaunch, launching, rateLimited, inProgress,
+  onLaunch, launching, rateLimitHours, inProgress,
 }: {
   onLaunch: () => void
   launching: boolean
-  rateLimited: boolean
+  rateLimitHours: number | null
   inProgress: boolean
 }) {
-  const blocked = rateLimited || inProgress
-  const hours = (() => {
-    const ts = localStorage.getItem(RL_KEY)
-    return ts ? Math.max(1, Math.ceil((24 * 3_600_000 - (Date.now() - Number(ts))) / 3_600_000)) : 24
-  })()
-  const tooltip = rateLimited
-    ? `Limite atteinte - réessayez dans ${hours}h`
+  const blocked = rateLimitHours !== null || inProgress
+  const tooltip = rateLimitHours !== null
+    ? `Limite atteinte - réessayez dans ${rateLimitHours}h`
     : inProgress ? "Une recherche est déjà en cours" : null
 
   return (
@@ -223,10 +221,10 @@ export default function DashboardPage() {
   const loadError = !!analysisError && !is404
 
   const [launching, setLaunching] = useState(false)
-  const [rateLimited, setRateLimited] = useState(() => {
-    const ts = localStorage.getItem(RL_KEY)
-    return ts ? Date.now() - Number(ts) < 24 * 3_600_000 : false
-  })
+  // Set only from a 429 this session's own request received - never persisted,
+  // so it can't leak across accounts sharing a browser or be edited to fake a
+  // block/unblock. The server remains the sole source of truth for enforcement.
+  const [rateLimitHours, setRateLimitHours] = useState<number | null>(null)
   const [inProgress, setInProgress] = useState(false)
   const [progress, setProgress]   = useState(8)
   const [step, setStep]           = useState("Initialisation…")
@@ -246,10 +244,11 @@ export default function DashboardPage() {
       const res = await launchSearch()
       queryClient.setQueryData(QK.latestAnalysis, res.data)
     } catch (e: unknown) {
-      const status = (e as { response?: { status?: number } })?.response?.status
+      const err = e as { response?: { status?: number; data?: { detail?: { wait_hours?: number } } } }
+      const status = err.response?.status
       if (status === 429) {
-        localStorage.setItem(RL_KEY, String(Date.now()))
-        setRateLimited(true)
+        const waitHours = err.response?.data?.detail?.wait_hours
+        setRateLimitHours(waitHours ? Math.ceil(waitHours) : 24)
       } else if (status === 409) {
         setInProgress(true)
       }
@@ -336,12 +335,11 @@ export default function DashboardPage() {
     [visible, page]
   )
 
-  const rlHoursLeft = (() => {
-    const ts = localStorage.getItem(RL_KEY)
-    return ts ? Math.max(1, Math.ceil((24 * 3_600_000 - (Date.now() - Number(ts))) / 3_600_000)) : 24
-  })()
-
-  if (analysisLoading || (is404 && cvCheckLoading)) {
+  // No analysis and no CV yet - a brand new user. The redirect effect above
+  // handles navigation to /setup, but it only fires *after* this render
+  // commits - without this guard, this render would still fall through to the
+  // main dashboard tree below with `analysis` undefined and crash.
+  if (analysisLoading || (is404 && cvCheckLoading) || (is404 && noCv)) {
     return (
       <Layout>
         <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
@@ -355,7 +353,7 @@ export default function DashboardPage() {
     return (
       <Layout title="Tableau de bord">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
-          <NoSearchCTA onLaunch={handleLaunchSearch} launching={launching} rateLimited={rateLimited} inProgress={inProgress} />
+          <NoSearchCTA onLaunch={handleLaunchSearch} launching={launching} rateLimitHours={rateLimitHours} inProgress={inProgress} />
         </div>
       </Layout>
     )
@@ -412,7 +410,7 @@ export default function DashboardPage() {
           <div className="relative group">
             <button
               onClick={handleLaunchSearch}
-              disabled={launching || inProgress || rateLimited || isProcessing}
+              disabled={launching || inProgress || rateLimitHours !== null || isProcessing}
               className="relative btn-accent ring-focus rounded-xl px-4 py-2.5 text-[13px] font-semibold flex items-center gap-2 shadow-[0_4px_18px_-2px_rgba(5,150,105,0.55)] hover:shadow-[0_6px_22px_-2px_rgba(5,150,105,0.7)] hover:-translate-y-0.5 transition disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none disabled:translate-y-0"
             >
               {launching ? (
@@ -420,7 +418,7 @@ export default function DashboardPage() {
               ) : (
                 <>
                   <span className="relative flex h-4 w-4 items-center justify-center shrink-0">
-                    {!(inProgress || rateLimited || isProcessing) && (
+                    {!(inProgress || rateLimitHours !== null || isProcessing) && (
                       <span className="absolute inline-flex h-full w-full rounded-full bg-white/40 animate-ping" />
                     )}
                     <Radar className="relative h-4 w-4" />
@@ -430,7 +428,7 @@ export default function DashboardPage() {
               )}
             </button>
 
-            {(rateLimited || inProgress) && (
+            {(rateLimitHours !== null || inProgress) && (
               <div className="pointer-events-none absolute top-full left-1/2 -translate-x-1/2 mt-2 flex flex-col items-center opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-20">
                 <div className="w-0 h-0" style={{ borderLeft: "5px solid transparent", borderRight: "5px solid transparent", borderBottom: "5px solid rgb(var(--ink))" }} />
                 <div
@@ -438,7 +436,7 @@ export default function DashboardPage() {
                   style={{ background: "rgb(var(--ink))" }}
                 >
                   <Clock className="h-3 w-3 shrink-0" />
-                  {rateLimited ? `Prochaine recherche possible dans ${rlHoursLeft}h` : "Une recherche est déjà en cours"}
+                  {rateLimitHours !== null ? `Prochaine recherche possible dans ${rateLimitHours}h` : "Une recherche est déjà en cours"}
                 </div>
               </div>
             )}

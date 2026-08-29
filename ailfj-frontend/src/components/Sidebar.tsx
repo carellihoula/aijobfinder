@@ -177,6 +177,7 @@ export default function Sidebar() {
         >
           <UserAvatar
             avatarKey={me?.avatar_key}
+            avatarUrl={me?.avatar_url}
             name={me?.full_name || me?.email}
             size={6}
           />
