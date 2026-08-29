@@ -3,29 +3,45 @@ from langchain_openai import OpenAIEmbeddings
 from sklearn.metrics.pairwise import cosine_similarity
 
 from app.config import settings
+from app.cv.vectorize import (
+    VECTOR_WEIGHTS,
+    build_cv_vector_texts,
+    flatten_vector_texts,
+    regroup_vectors,
+)
 from app.logger import get_logger
 from app.pipeline.state import PipelineState
 
 logger = get_logger(__name__)
 
-MIN_JOBS = 5  # always keep at least this many jobs for the reranker
+MAX_JOBS = 60  # llm_reranker caps its own input at the same count - no point keeping more
 
 
-def _build_cv_text(cv: dict) -> str:
-    parts = []
-    if cv.get("roles"):
-        parts.append("Roles: " + ", ".join(cv["roles"]))
-    if cv.get("skills"):
-        parts.append("Skills: " + ", ".join(cv["skills"][:20]))
-    if cv.get("summary"):
-        parts.append(cv["summary"])
-    if cv.get("level"):
-        parts.append("Level: " + cv["level"])
-    return " | ".join(parts)
+def _fused_similarity(cv_vectors: dict, job_vectors: np.ndarray) -> np.ndarray:
+    """Weighted fusion of per-facet cosine similarities against each job
+    vector. Mirrors cortex_svc.search_jobs' SQL fusion exactly (same weights,
+    same pooling) - there it's a weighted sum of distances with LEAST() over
+    experiences, here it's a weighted sum of similarities with MAX() over
+    experiences, since similarity is just distance's complement."""
+    present_weights = {k: VECTOR_WEIGHTS[k] for k in cv_vectors if k in VECTOR_WEIGHTS}
+    total_weight = sum(present_weights.values())
+
+    fused = np.zeros(job_vectors.shape[0])
+    for name, weight in present_weights.items():
+        normalized_weight = weight / total_weight
+        if name == "experiences":
+            exp_matrix = np.array(cv_vectors["experiences"])
+            sims = cosine_similarity(exp_matrix, job_vectors)
+            facet_sim = sims.max(axis=0)  # best-matching experience per job
+        else:
+            vec = np.array(cv_vectors[name]).reshape(1, -1)
+            facet_sim = cosine_similarity(vec, job_vectors)[0]
+        fused += normalized_weight * facet_sim
+    return fused
 
 
 async def embeddings_filter_node(state: PipelineState) -> dict:
-    """Node 5 - Semantic filter: keep jobs above mean cosine similarity with CV."""
+    """Node 5 - Semantic filter: keep jobs above mean fused similarity with CV."""
     cv = state.get("cv_json") or {}
     jobs = state.get("jobs") or []
 
@@ -33,15 +49,20 @@ async def embeddings_filter_node(state: PipelineState) -> dict:
         logger.warning("[embeddings_filter] No jobs to filter")
         return {"filtered_jobs": []}
 
-    cv_text = _build_cv_text(cv)
+    cv_vector_texts = build_cv_vector_texts(cv)
+    if not cv_vector_texts:
+        logger.warning("[embeddings_filter] Empty CV profile - keeping all jobs unfiltered")
+        return {"filtered_jobs": jobs}
+
+    cv_flat_texts, cv_flat_keys = flatten_vector_texts(cv_vector_texts)
     job_texts = [
         f"{job.get('title', '')} {job.get('desc', '')}".strip()
         for job in jobs
     ]
 
     logger.info(
-        "[embeddings_filter] Embedding CV + %d jobs (model=%s) ...",
-        len(jobs), settings.OPENAI_EMBEDDING_MODEL,
+        "[embeddings_filter] Embedding CV (%d facet vectors) + %d jobs (model=%s) ...",
+        len(cv_flat_texts), len(jobs), settings.OPENAI_EMBEDDING_MODEL,
     )
 
     embedder = OpenAIEmbeddings(
@@ -49,12 +70,12 @@ async def embeddings_filter_node(state: PipelineState) -> dict:
         api_key=settings.OPENAI_API_KEY,
     )
 
-    # Single batch call: CV first, then all jobs
-    all_vectors = await embedder.aembed_documents([cv_text] + job_texts)
-    cv_vector = np.array(all_vectors[0]).reshape(1, -1)
-    job_vectors = np.array(all_vectors[1:])
+    # Single batch call: every CV facet vector first, then all jobs
+    all_vectors = await embedder.aembed_documents(cv_flat_texts + job_texts)
+    cv_vectors = regroup_vectors(cv_flat_keys, all_vectors[:len(cv_flat_texts)])
+    job_vectors = np.array(all_vectors[len(cv_flat_texts):])
 
-    scores = cosine_similarity(cv_vector, job_vectors)[0]
+    scores = _fused_similarity(cv_vectors, job_vectors)
 
     scored_jobs = sorted(
         [{**job, "_score": round(float(score), 4)} for job, score in zip(jobs, scores)],
@@ -62,16 +83,15 @@ async def embeddings_filter_node(state: PipelineState) -> dict:
         reverse=True,
     )
 
-    mean_score = float(np.mean(scores))
-    filtered = [j for j in scored_jobs if j["_score"] >= mean_score]
-
-    # Guarantee minimum jobs for the reranker
-    if len(filtered) < MIN_JOBS:
-        filtered = scored_jobs[:MIN_JOBS]
+    # Fixed top-K instead of "above the batch's mean score" - a mean cutoff
+    # always rejects roughly half the lot regardless of absolute quality: a
+    # strong job in an exceptional batch could get cut, a weak job in a poor
+    # batch could pass. A fixed count doesn't depend on today's distribution.
+    filtered = scored_jobs[:MAX_JOBS]
 
     logger.info(
-        "[embeddings_filter] %d jobs in → %d kept (mean=%.4f, best=%.4f, worst kept=%.4f)",
-        len(jobs), len(filtered), mean_score,
+        "[embeddings_filter] %d jobs in → %d kept (best=%.4f, worst kept=%.4f)",
+        len(jobs), len(filtered),
         scored_jobs[0]["_score"],
         filtered[-1]["_score"],
     )

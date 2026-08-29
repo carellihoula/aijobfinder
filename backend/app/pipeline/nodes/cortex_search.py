@@ -3,6 +3,7 @@ from langchain_openai import OpenAIEmbeddings
 from app.config import settings
 from app.cortex import service as cortex_svc
 from app.cortex.db import CortexSessionLocal
+from app.cv.vectorize import build_cv_vector_texts, flatten_vector_texts, regroup_vectors
 from app.logger import get_logger
 from app.pipeline.state import PipelineState
 
@@ -24,20 +25,23 @@ def _clean_location(location: str) -> str:
     return location.strip()
 
 
-def _build_cv_query(cv: dict, experience_level: str) -> str:
-    """Build the vector search query from the CV profile."""
-    parts = []
-    if cv.get("roles"):
-        parts.append("Roles: " + ", ".join(cv["roles"]))
-    if cv.get("skills"):
-        parts.append("Skills: " + ", ".join(cv["skills"][:20]))
-    if cv.get("summary"):
-        parts.append(cv["summary"])
-    if cv.get("level"):
-        parts.append("Level: " + cv["level"])
-    if experience_level:
-        parts.append(f"Target seniority: {experience_level}")
-    return " | ".join(parts)
+async def _embed_cv_vectors(cv: dict) -> dict:
+    """Embed every CV facet text from `build_cv_vector_texts` in a single
+    batched API call, then regroup the results back into the {name: vector}
+    shape `cortex_svc.search_jobs` expects."""
+    vector_texts = build_cv_vector_texts(cv)
+    if not vector_texts:
+        return {}
+
+    flat_texts, flat_keys = flatten_vector_texts(vector_texts)
+
+    embedder = OpenAIEmbeddings(
+        model=settings.OPENAI_EMBEDDING_MODEL,
+        api_key=settings.OPENAI_API_KEY,
+    )
+    raw_vectors = await embedder.aembed_documents(flat_texts)
+
+    return regroup_vectors(flat_keys, raw_vectors)
 
 
 async def cortex_search_node(state: PipelineState) -> dict:
@@ -56,8 +60,8 @@ async def cortex_search_node(state: PipelineState) -> dict:
     remote:         bool      = state.get("remote") or False
     experience_level: str     = state.get("experience_level") or ""
 
-    cv_query = _build_cv_query(cv, experience_level)
-    if not cv_query.strip():
+    query_vectors = await _embed_cv_vectors(cv)
+    if "competences" not in query_vectors:
         logger.warning("[cortex_search] Empty CV profile - no jobs returned")
         return {"jobs": []}
 
@@ -73,16 +77,10 @@ async def cortex_search_node(state: PipelineState) -> dict:
         contract_type or "all", remote, experience_level or "all", effective_locations,
     )
 
-    embedder = OpenAIEmbeddings(
-        model=settings.OPENAI_EMBEDDING_MODEL,
-        api_key=settings.OPENAI_API_KEY,
-    )
-    cv_embedding = await embedder.aembed_query(cv_query)
-
     async with CortexSessionLocal() as db:
         rows = await cortex_svc.search_jobs(
             db,
-            query_embedding=cv_embedding,
+            query_vectors=query_vectors,
             limit=TOP_K,
             contract_type=contract_type,
             remote=remote,
