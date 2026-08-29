@@ -15,7 +15,7 @@ AI-powered CV-to-job matching API. User uploads a PDF CV → LangGraph pipeline 
 - **Storage**: AWS S3 (`S3_BUCKET` + `AWS_*`) with local disk fallback
 - **Queue**: Celery + Redis (`REDIS_URL`), scheduled with Celery Beat
 - **Job providers**: JSearch (RapidAPI) + Adzuna
-- **PDF generation**: reportlab (pure Python, no system deps)
+- **PDF generation**: WeasyPrint (real HTML/CSS rendering, needs Pango/HarfBuzz system libs)
 
 ---
 
@@ -53,7 +53,7 @@ Centralized pgvector job index. Pre-populated by Celery crons, served to all use
 
 **Agent**: LLM produces `CoverLetterContent` (fully structured JSON with sender, recipient, paragraphs with purpose labels, tone, highlighted_skills, key_selling_point). Backends only consume this object.
 
-**PDF backend** (`backend/app/cover_letter/backends/reportlab_backend.py`) — pure Python, no system deps.
+**PDF backend** (`backend/app/cover_letter/backends/weasyprint_backend.py`) — renders the letter's real HTML/CSS (the same markup SimpleEditor shows and edits), so formatting matches exactly.
 
 ---
 

@@ -1,22 +1,25 @@
 import { useEffect, useRef, useState } from "react"
-import { useApplications, useCoverLetters, useLatestAnalysis } from "../lib/queries"
+import { useQueryClient } from "@tanstack/react-query"
+import { QK, useApplications, useCoverLetters, useLatestAnalysis } from "../lib/queries"
 import { useSearchParams } from "react-router-dom"
 import {
   FileText, Mail, ChevronDown, ChevronUp,
   ZoomIn, ZoomOut, Download, Loader2,
-  FileX, RefreshCw, Sparkles, RotateCcw, X, Search, Menu,
+  FileX, RefreshCw, Sparkles, RotateCcw, Trash2, Search, Menu,
 } from "lucide-react"
 import { Document, Page, pdfjs } from "react-pdf"
 import { SimpleEditor } from "../components/tiptap-templates/simple/simple-editor"
 import Layout from "../components/Layout"
 import {
   fetchCvPdf, updateCoverLetterBody, getCoverLetterBody, generateCoverLetterJson, exportCoverLetterPdf,
+  deleteCoverLetter,
 } from "../api/apply"
 import {
   getApplicationCoverLetterBody, generateApplicationCoverLetterJson,
   exportApplicationCoverLetterPdf, updateApplicationCoverLetterBody,
 } from "../api/applications"
 import { getSavedJobs, unsaveJob } from "../lib/savedJobs"
+import { getHiddenApplicationIds, hideApplication, unhideApplication } from "../lib/hiddenApplications"
 
 // PDF.js worker - renders PDF to <canvas>, no browser native viewer, no black borders
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
@@ -98,6 +101,7 @@ export default function DocumentsPage() {
   // letter has been shown once, switching back to it is instant, no re-fetch.
   const letterCacheRef = useRef<Map<string, CachedLetter>>(new Map())
 
+  const queryClient = useQueryClient()
   const { data: latestAnalysis } = useLatestAnalysis()
   const { data: coverLetters = [] } = useCoverLetters(latestAnalysis?.id)
   const { data: applications = [] } = useApplications()
@@ -175,8 +179,13 @@ export default function DocumentsPage() {
   // application is deleted, since a fresh fetch simply no longer contains it. ──
 
   useEffect(() => {
+    // Reopening a letter from "Mes candidatures" always un-hides it here, even
+    // if it was previously dismissed with "Supprimer".
+    if (initApplicationId) unhideApplication(initApplicationId)
+    const hiddenIds = new Set(getHiddenApplicationIds())
+
     const items: DocItem[] = applications
-      .filter((a) => a.cover_letter_status === "completed")
+      .filter((a) => a.cover_letter_status === "completed" && !hiddenIds.has(a.id))
       .map((a) => ({
         id: `cl-application-${a.id}`,
         kind: "cl" as const,
@@ -357,8 +366,23 @@ export default function DocumentsPage() {
       (j) => j.analysisId === doc.analysisId && j.originalIndex === doc.jobIndex
     )
     if (savedJob) unsaveJob(savedJob.id)
-    // Remove from local list
+
+    letterCacheRef.current.delete(doc.id)
+    // Remove from local list immediately (optimistic).
     setDocs((prev) => prev.filter((d) => d.id !== doc.id))
+    if (doc.source === "analysis" && doc.jobIndex !== undefined) {
+      // Real DB delete - a bookmarked-but-not-yet-generated offer just gets
+      // un-bookmarked above, nothing to delete server side.
+      deleteCoverLetter(doc.analysisId, doc.jobIndex)
+        .then(() => queryClient.invalidateQueries({ queryKey: QK.coverLetters(doc.analysisId) }))
+        .catch(() => { /* best-effort - a stale refetch would just re-add it */ })
+    } else if (doc.source === "application" && doc.applicationId) {
+      // Not a real delete - the letter lives on the Application row, which
+      // "Mes candidatures" owns. This only hides it here; reopening it from
+      // "Mes candidatures" (or deleting the application there) is how it truly
+      // goes away.
+      hideApplication(doc.applicationId)
+    }
     if (active?.id === doc.id) {
       setActive(null)
       revokePdf()
@@ -412,6 +436,20 @@ export default function DocumentsPage() {
   const visible = showAll ? filteredDocs : filteredDocs.slice(0, LIST_LIMIT)
   const hasMore = filteredDocs.length > LIST_LIMIT
 
+  // Auto-reveal (and scroll to) the active doc if it's collapsed under "Voir plus" -
+  // otherwise opening one further down the list leaves it hidden with no visual
+  // trace of what's actually open.
+  useEffect(() => {
+    if (!active) return
+    const idx = filteredDocs.findIndex((d) => d.id === active.id)
+    if (idx >= LIST_LIMIT && !showAll) setShowAll(true)
+  }, [active, filteredDocs, showAll])
+
+  useEffect(() => {
+    if (!active) return
+    document.getElementById(`doc-item-${active.id}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" })
+  }, [active, showAll])
+
   const showLetterActions = isEditableLetter && (canvasState === "loaded" || canvasState === "refine")
   const headerActions = showLetterActions ? (
     <>
@@ -425,6 +463,13 @@ export default function DocumentsPage() {
         <Download className="h-3.5 w-3.5" />
         <span className="hidden sm:inline">Exporter en PDF</span>
       </button>
+      {active && (
+        <button onClick={() => handleRemoveDoc(active)}
+          className="btn-ghost ring-focus flex items-center gap-1.5 rounded-lg px-3 h-8 text-[12px] text-red-400 hover:bg-red-400/10 shrink-0">
+          <Trash2 className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">Supprimer</span>
+        </button>
+      )}
     </>
   ) : undefined
 
@@ -500,10 +545,10 @@ export default function DocumentsPage() {
                     const isActive = active?.id === doc.id
                     const Icon     = doc.kind === "cv" ? FileText : Mail
                     return (
-                      <div key={doc.id} className="group/item relative">
+                      <div key={doc.id} id={`doc-item-${doc.id}`}>
                         <button
                           onClick={() => selectDoc(doc)}
-                          className={`w-full flex items-center gap-2.5 px-2.5 py-2.5 rounded-lg text-left transition-colors pr-7 ${
+                          className={`w-full flex items-center gap-2.5 px-2.5 py-2.5 rounded-lg text-left transition-colors ${
                             isActive ? "bg-accent/10" : "hover:bg-line/5"
                           }`}
                         >
@@ -521,16 +566,6 @@ export default function DocumentsPage() {
                             </p>
                           </div>
                         </button>
-                        {/* Remove button - CL only, visible on hover */}
-                        {doc.kind === "cl" && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleRemoveDoc(doc) }}
-                            title="Supprimer"
-                            className="absolute right-1.5 top-1/2 -translate-y-1/2 h-5 w-5 rounded flex items-center justify-center text-subtle hover:text-red-400 hover:bg-red-400/10 transition opacity-0 group-hover/item:opacity-100"
-                          >
-                            <X className="h-3 w-3" />
-                          </button>
-                        )}
                       </div>
                     )
                   })}

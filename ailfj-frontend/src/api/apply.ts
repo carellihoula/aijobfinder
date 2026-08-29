@@ -136,6 +136,10 @@ export interface CoverLetterSummary {
 export const listCoverLetters = (analysisId: string): Promise<CoverLetterSummary[]> =>
   client.get<CoverLetterSummary[]>(`/analysis/${analysisId}/cover-letters`).then((r) => r.data)
 
+/** Permanently deletes a generated cover letter for this offer. */
+export const deleteCoverLetter = (analysisId: string, jobIndex: number) =>
+  client.delete(`/analysis/${analysisId}/cover-letter?job_index=${jobIndex}`)
+
 /** Generates (or AI-refines) the letter - returns JSON straight into the editor, no PDF. */
 export const generateCoverLetterJson = (
   analysisId: string,
@@ -150,7 +154,7 @@ export const generateCoverLetterJson = (
     })
     .then((r) => r.data)
 
-/** Saves the current editor text and renders it to PDF via reportlab - the only
+/** Saves the current editor text and renders it to PDF via WeasyPrint - the only
  * point in this flow where a PDF is ever produced. */
 export const exportCoverLetterPdf = async (
   analysisId: string,

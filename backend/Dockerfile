@@ -2,6 +2,12 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# WeasyPrint's text/font rendering (Pango/HarfBuzz) - shared libs only, no compiler
+# needed since pip installs weasyprint from a prebuilt wheel.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpango-1.0-0 libharfbuzz0b libpangoft2-1.0-0 libharfbuzz-subset0 \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir --default-timeout=120 --retries 5 -r requirements.txt
 

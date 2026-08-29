@@ -175,7 +175,7 @@ async def update_cover_letter_body(
 
 @router.post(
     "/{application_id}/cover-letter/export",
-    summary="Save the current editor text and render it to PDF via reportlab",
+    summary="Save the current editor text and render it to PDF via WeasyPrint",
     response_class=StreamingResponse,
 )
 async def export_cover_letter_pdf(

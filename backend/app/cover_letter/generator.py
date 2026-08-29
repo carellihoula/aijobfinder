@@ -180,12 +180,14 @@ async def generate_cover_letter(
 
 
 def render_pdf(content: CoverLetterContent, body_text: str | None = None) -> bytes:
-    """If body_text is given, it replaces the salutation/paragraphs/closing/sign-off
-    block (the user's manually edited version) - the header (sender, recipient,
-    date, subject) still comes from content, unchanged."""
-    from app.cover_letter.backends.reportlab_backend import render
+    """Renders the full letter to PDF via WeasyPrint, from real HTML/CSS - the
+    same markup SimpleEditor shows, so formatting (bold, links, highlight,
+    alignment, lists...) matches exactly. `body_text` is the user-edited HTML
+    (already the full letter, header included) when present; otherwise the
+    letter is built fresh from `content` via letter_html()."""
+    from app.cover_letter.backends.weasyprint_backend import render
 
-    return render(content, body_text=body_text)
+    return render(body_text if body_text is not None else letter_html(content))
 
 
 def letter_body_text(content: CoverLetterContent) -> str:

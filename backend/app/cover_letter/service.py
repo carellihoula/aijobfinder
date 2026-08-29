@@ -51,3 +51,12 @@ async def update_edited_body(
     await db.commit()
     await db.refresh(existing)
     return existing
+
+
+async def delete_cover_letter(db: AsyncSession, analysis_id: UUID, job_index: int) -> bool:
+    existing = await get_cover_letter(db, analysis_id, job_index)
+    if not existing:
+        return False
+    await db.delete(existing)
+    await db.commit()
+    return True

@@ -136,7 +136,7 @@ export const generateApplicationCoverLetterJson = async (
   return body
 }
 
-/** Saves the current editor text and renders it to PDF via reportlab - the only
+/** Saves the current editor text and renders it to PDF via WeasyPrint - the only
  * point in this flow where a PDF is ever produced. */
 export const exportApplicationCoverLetterPdf = async (
   applicationId: string,

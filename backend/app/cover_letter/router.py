@@ -242,6 +242,26 @@ async def list_cover_letters(
     return items
 
 
+@router.delete(
+    "/{analysis_id}/cover-letter",
+    summary="Delete a generated cover letter for this offer",
+    status_code=204,
+)
+async def delete_cover_letter(
+    analysis_id: UUID,
+    job_index: int = Query(0, ge=0, description="Index of the job in the matches list"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    analysis = await get_analysis(db, analysis_id, current_user.id)
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+
+    ok = await cover_letter_svc.delete_cover_letter(db, analysis_id, job_index)
+    if not ok:
+        raise HTTPException(status_code=404, detail="No cover letter found for this offer")
+
+
 @router.post(
     "/{analysis_id}/cover-letter/generate",
     summary="Generate or refine the letter via AI - returns JSON (content + body), no PDF rendering",
@@ -281,7 +301,7 @@ async def generate_cover_letter_json(
 
 @router.post(
     "/{analysis_id}/cover-letter/export",
-    summary="Save the current editor text and render it to PDF via reportlab",
+    summary="Save the current editor text and render it to PDF via WeasyPrint",
     response_class=StreamingResponse,
 )
 async def export_cover_letter_pdf(
