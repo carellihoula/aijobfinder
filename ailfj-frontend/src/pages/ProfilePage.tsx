@@ -11,10 +11,10 @@ import Layout from "../components/Layout"
 import { clearAvatarCache, blobCache } from "../components/UserAvatar"
 import { useUser } from "../lib/userContext"
 import { useAuth } from "../hooks/useAuth"
-import { updateCvData, launchSearch, uploadCV } from "../api/analysis"
+import { updateCvData, launchSearch, uploadCV, SEARCH_COOLDOWN_MS } from "../api/analysis"
 import { updatePreferences } from "../api/users"
 import { useQueryClient } from "@tanstack/react-query"
-import { QK, useCvData, usePreferences } from "../lib/queries"
+import { QK, useCvData, useLatestAnalysis, usePreferences } from "../lib/queries"
 import { uploadAvatar, deleteAvatar } from "../api/auth"
 import type { CvData, CvExperience, CvEducation, CvLanguage } from "../api/analysis"
 import type { UserPreferences } from "../api/users"
@@ -1364,6 +1364,7 @@ export default function ProfilePage() {
   const queryClient = useQueryClient()
   const { data: cvData, isLoading: cvLoading } = useCvData()
   const { data: prefsData, isLoading: prefsLoading } = usePreferences()
+  const { data: analysis } = useLatestAnalysis()
   const loading = cvLoading || prefsLoading
 
   const [cv, setCv] = useState<CvData | null>(null)
@@ -1372,10 +1373,10 @@ export default function ProfilePage() {
   const [cvPendingFile, setCvPendingFile] = useState<File | null>(null)
   const [cvPhase, setCvPhase] = useState<"confirm" | "uploading" | "extracting" | "error">("confirm")
   const [launching, setLaunching] = useState(false)
-  const [rateLimited, setRateLimited] = useState(() => {
-    const ts = localStorage.getItem("ailfj_search_rl_at")
-    return ts ? Date.now() - Number(ts) < 24 * 3_600_000 : false
-  })
+  // Set from a 429 this session's own request received, or proactively computed
+  // below from the already-loaded analysis - never persisted (no localStorage),
+  // the server remains the sole source of truth for enforcement.
+  const [rateLimitHours, setRateLimitHours] = useState<number | null>(null)
   const [inProgress, setInProgress] = useState(false)
 
   // Avatar state
@@ -1392,6 +1393,23 @@ export default function ProfilePage() {
     if (cvData)    setCv(cvData)
     if (prefsData) setPrefs({ ...DEFAULT_PREFS, ...prefsData })
   }, [cvLoading, prefsLoading, cvData, prefsData])
+
+  // Proactively compute (and keep live) whether the cooldown is still active
+  // from the already-loaded analysis, instead of waiting for a failed click to
+  // reveal it - mirrors DashboardPage's own launch-search button.
+  useEffect(() => {
+    if (!analysis || analysis.status !== "completed") return
+
+    const createdAt = new Date(analysis.created_at).getTime()
+    const update = () => {
+      const remainingMs = SEARCH_COOLDOWN_MS - (Date.now() - createdAt)
+      setRateLimitHours(remainingMs > 0 ? Math.ceil(remainingMs / 3_600_000) : null)
+    }
+
+    update()
+    const interval = setInterval(update, 60_000)
+    return () => clearInterval(interval)
+  }, [analysis?.status, analysis?.created_at])
 
   // Wrappers that update both local state and query cache after each save
   const handleUpdateCv = useCallback((data: CvData) => {
@@ -1479,10 +1497,11 @@ export default function ProfilePage() {
       await launchSearch()
       navigate("/dashboard")
     } catch (e: unknown) {
-      const status = (e as { response?: { status?: number } })?.response?.status
+      const err = e as { response?: { status?: number; data?: { detail?: { wait_hours?: number } } } }
+      const status = err.response?.status
       if (status === 429) {
-        localStorage.setItem("ailfj_search_rl_at", String(Date.now()))
-        setRateLimited(true)
+        const waitHours = err.response?.data?.detail?.wait_hours
+        setRateLimitHours(waitHours ? Math.ceil(waitHours) : 4)
       } else if (status === 409) {
         setInProgress(true)
       }
@@ -1538,11 +1557,9 @@ export default function ProfilePage() {
           </div>
           <div className="flex items-center gap-2 shrink-0">
             {cv && (() => {
-              const blocked = rateLimited || inProgress
-              const rlTs = localStorage.getItem("ailfj_search_rl_at")
-              const hours = rlTs ? Math.max(1, Math.ceil((24 * 3_600_000 - (Date.now() - Number(rlTs))) / 3_600_000)) : 24
-              const tooltip = rateLimited
-                ? `Limite atteinte - réessayez dans ${hours}h`
+              const blocked = rateLimitHours !== null || inProgress
+              const tooltip = rateLimitHours !== null
+                ? `Limite atteinte - réessayez dans ${rateLimitHours}h`
                 : inProgress ? "Une recherche est déjà en cours" : null
               return (
                 <div className="relative group">

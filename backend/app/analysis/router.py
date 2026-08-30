@@ -24,7 +24,7 @@ from app.users.models import User
 router = APIRouter(prefix="/analysis", tags=["Analysis"])
 logger = get_logger(__name__)
 
-_PIPELINE_COOLDOWN = 86_400  # 24 h in seconds
+_PIPELINE_COOLDOWN = 14_400  # 4 h in seconds
 
 
 # ─── Upload - profile init (one-time) ────────────────────────────────────────
@@ -96,7 +96,7 @@ async def launch_search(
 ):
     """
     Launch a job-search run using the user's profile (cv.data + user.preferences).
-    No PDF required. Rate-limited to once per 24 h.
+    No PDF required. Rate-limited to once per 4 h.
     Progress available via SSE: GET /analysis/{id}/stream.
     """
     cv = await cv_svc.get_latest_cv_for_user(db, current_user.id)

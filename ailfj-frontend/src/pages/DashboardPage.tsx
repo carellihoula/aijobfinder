@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { FileText, RefreshCw, AlertCircle, Search, Loader2, Clock, ChevronDown, Plus, Radar } from "lucide-react"
-import { getAnalysis, getCvData, launchSearch } from "../api/analysis"
+import { getAnalysis, getCvData, launchSearch, SEARCH_COOLDOWN_MS } from "../api/analysis"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { QK, useLatestAnalysis } from "../lib/queries"
 import type { Analysis, JobMatch as BackendJobMatch } from "../types"
@@ -144,7 +144,7 @@ function AnalysisHeader({ analysis }: { analysis: Analysis }) {
 }
 
 // ─── No-search CTA ───────────────────────────────────────────────────────────
-// The 24h cooldown is enforced server-side, per user, against Analysis.created_at
+// The cooldown is enforced server-side, per user, against Analysis.created_at
 // (see POST /analysis/search) - nothing about it is ever persisted client-side,
 // so there's nothing here to leak across accounts on the same browser or to tamper
 // with. `rateLimitHours` only ever reflects a 429 this session's own request hit.
@@ -238,6 +238,27 @@ export default function DashboardPage() {
     if (is404 && !cvCheckLoading && noCv) navigate("/setup", { replace: true })
   }, [is404, cvCheckLoading, noCv, navigate])
 
+  // Proactively compute (and keep live) whether the cooldown is still
+  // active from the already-loaded analysis, instead of waiting for a failed
+  // click to reveal it - a button that looks clickable until you try it is
+  // confusing, and one that never re-enables itself once the cooldown passes
+  // is just as bad. The server remains the sole source of truth for
+  // enforcement (see handleLaunchSearch's 429 handling below) - this only
+  // drives what the button looks like before that request is even made.
+  useEffect(() => {
+    if (!analysis || analysis.status !== "completed") return
+
+    const createdAt = new Date(analysis.created_at).getTime()
+    const update = () => {
+      const remainingMs = SEARCH_COOLDOWN_MS - (Date.now() - createdAt)
+      setRateLimitHours(remainingMs > 0 ? Math.ceil(remainingMs / 3_600_000) : null)
+    }
+
+    update()
+    const interval = setInterval(update, 60_000)
+    return () => clearInterval(interval)
+  }, [analysis?.status, analysis?.created_at])
+
   const handleLaunchSearch = async () => {
     setLaunching(true)
     try {
@@ -248,7 +269,7 @@ export default function DashboardPage() {
       const status = err.response?.status
       if (status === 429) {
         const waitHours = err.response?.data?.detail?.wait_hours
-        setRateLimitHours(waitHours ? Math.ceil(waitHours) : 24)
+        setRateLimitHours(waitHours ? Math.ceil(waitHours) : 4)
       } else if (status === 409) {
         setInProgress(true)
       }

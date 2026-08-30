@@ -1,6 +1,11 @@
 import { client } from './client'
 import type { Analysis } from '../types'
 
+// Mirrors backend's _PIPELINE_COOLDOWN (analysis/router.py) - shared by every
+// page that shows a "launch search" button (Dashboard, Profile) so they can't
+// drift apart the way the old per-page localStorage hacks did.
+export const SEARCH_COOLDOWN_MS = 14_400_000 // 4h
+
 export interface CvInitResult {
   cv_id: string
   status: 'processing' | 'ready'
