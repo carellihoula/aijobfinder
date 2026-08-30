@@ -55,17 +55,25 @@ function VerificationBanner() {
 }
 
 export default function Layout({ children, title, subtitle, actions }: Props) {
-  const { collapsed } = useSidebar()
+  const { collapsed, mobileOpen, closeMobile } = useSidebar()
   const { me } = useUser()
   const sidebarW = collapsed ? 56 : 220
 
   return (
     <div className="flex min-h-screen bg-[rgb(var(--bg))]">
       <Sidebar />
+      {/* Backdrop for the mobile/tablet drawer - lg:hidden since the sidebar
+          is never off-canvas at that size, so mobileOpen is irrelevant there. */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/40 lg:hidden"
+          onClick={closeMobile}
+        />
+      )}
       <div
-        className="flex-1 min-w-0 flex flex-col"
+        className="app-content flex-1 min-w-0 flex flex-col"
         style={{
-          marginLeft: sidebarW,
+          ...({ "--sidebar-w": `${sidebarW}px` } as React.CSSProperties),
           transition: "margin-left 0.22s cubic-bezier(0.4,0,0.2,1)",
         }}
       >

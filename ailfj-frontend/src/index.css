@@ -177,6 +177,20 @@
   .no-scrollbar::-webkit-scrollbar { display: none; }
   .no-scrollbar { scrollbar-width: none; }
 
+  /* Sidebar/content widths are computed in JS (collapsed = 56/220px) and only
+     apply from `lg` up - below that the sidebar is an off-canvas drawer at a
+     fixed width and the content takes the full viewport. Plain Tailwind
+     classes can't express "this JS-computed pixel value, but only at lg:",
+     hence the CSS variable + media query instead of an inline style. */
+  .app-sidebar { width: 260px; }
+  @media (min-width: 1024px) {
+    .app-sidebar { width: var(--sidebar-w); }
+  }
+  .app-content { margin-left: 0; }
+  @media (min-width: 1024px) {
+    .app-content { margin-left: var(--sidebar-w); }
+  }
+
   .pulse-dot {
     box-shadow: 0 0 0 0 rgba(62,207,142,.4);
     animation: pulse-dot 2s infinite;

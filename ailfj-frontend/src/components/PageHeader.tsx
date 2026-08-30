@@ -1,9 +1,10 @@
-import { Bell, Settings, User, LogOut } from "lucide-react"
+import { Bell, Settings, User, LogOut, Menu } from "lucide-react"
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { useUnreadNotificationsCount } from "../lib/queries"
 import { useUser } from "../lib/userContext"
 import { useAuth } from "../hooks/useAuth"
+import { useSidebar } from "../lib/sidebarContext"
 import UserAvatar from "./UserAvatar"
 
 interface Props {
@@ -16,18 +17,28 @@ export default function PageHeader({ title, subtitle, actions }: Props) {
   const navigate = useNavigate()
   const { me } = useUser()
   const { logout } = useAuth()
+  const { openMobile } = useSidebar()
   const [menuOpen, setMenuOpen] = useState(false)
   const { data: unread = 0 } = useUnreadNotificationsCount()
 
   return (
     <header
-      className="sticky top-0 z-20 h-14 flex items-center gap-3 px-6 shrink-0"
+      className="sticky top-0 z-20 h-14 flex items-center gap-3 px-4 sm:px-6 shrink-0"
       style={{
         background: "rgb(var(--bg) / 0.88)",
         backdropFilter: "blur(12px)",
         borderBottom: "1px solid rgb(var(--line) / var(--line-a))",
       }}
     >
+      {/* Hamburger - only below lg, sidebar is fixed and always visible above that */}
+      <button
+        onClick={openMobile}
+        className="lg:hidden h-8 w-8 -ml-1 rounded-lg flex items-center justify-center text-muted hover:bg-line/5 hover:text-ink transition shrink-0"
+        title="Ouvrir le menu"
+      >
+        <Menu className="h-4.5 w-4.5" />
+      </button>
+
       {/* Title */}
       <div className="flex-1 min-w-0">
         <h1 className="text-[13px] font-semibold text-ink leading-none truncate">{title}</h1>
