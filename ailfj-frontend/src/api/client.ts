@@ -34,13 +34,23 @@ client.interceptors.response.use(
     const isRefreshCall = err.config?.url?.endsWith('/auth/refresh')
     const isAuthPage = AUTH_PAGES.includes(window.location.pathname)
 
-    if (err.response?.status === 401 && !isMeProbe && !isRefreshCall && !isAuthPage && !err.config?._retry) {
+    if (err.response?.status === 401 && !isRefreshCall && !isAuthPage && !err.config?._retry) {
+      // Always attempt a silent refresh first, even for /users/me - an expired
+      // access token on an actually-logged-in user (refresh cookie still valid
+      // for up to 30 days) must not be mistaken for "never logged in" just
+      // because /users/me happened to be the first call to hit the 401.
       const refreshed = await refreshAccessToken()
       if (refreshed) {
         err.config._retry = true
         return client(err.config)
       }
-      window.location.href = '/login'
+      // Refresh itself failed (no/invalid refresh cookie) - only force a hard
+      // redirect for an actually authenticated action. A failed /users/me
+      // probe here is the genuine "anonymous visitor on a public page" case;
+      // let it reject normally so UserProvider just renders logged-out.
+      if (!isMeProbe) {
+        window.location.href = '/login'
+      }
     }
     return Promise.reject(err)
   }

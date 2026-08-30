@@ -78,7 +78,7 @@ async def report_generator_node(state: PipelineState) -> dict:
     logger.info("[report_generator] Generating report for %d matches ...", len(matches))
 
     llm = ChatOpenAI(
-        model=settings.OPENAI_MODEL,
+        model=settings.OPENAI_MODEL_LIGHT,
         temperature=0.3,
         api_key=settings.OPENAI_API_KEY,
     )

@@ -30,8 +30,20 @@ class Settings(BaseSettings):
     ADMIN_EMAILS: str = ""
 
     OPENAI_API_KEY: str = ""
-    OPENAI_MODEL: str = "gpt-5.6-luna"
+    # LIGHT: extraction/classification/summarization tasks (CV parsing, keyword
+    # extraction, job-posting scraping, LLM reranking, report generation, and
+    # the Gemini enrichment fallback) - no benefit from a stronger model here.
+    # QUALITY: the one genuinely high-stakes writing task - the cover letter is
+    # an external document representing the candidate to an employer.
+    OPENAI_MODEL_LIGHT: str = "gpt-4o-mini"
+    OPENAI_MODEL_QUALITY: str = "gpt-5.6-luna"
     OPENAI_EMBEDDING_MODEL: str = "text-embedding-3-small"
+
+    # Free-tier LLM for Cortex ingestion enrichment (seniority + skills extraction) -
+    # a high-volume, low-stakes task, unlike LLM reranking which stays on OpenAI.
+    # Falls back to OPENAI_MODEL_LIGHT automatically if empty or if a Gemini call fails.
+    GOOGLE_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-3.5-flash-lite"
 
     CORTEX_DATABASE_URL: str = ""  # postgresql+asyncpg://user:pass@host:5432/postgres
     REDIS_URL: str = "redis://localhost:6379/0"

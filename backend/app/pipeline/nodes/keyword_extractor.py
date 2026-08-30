@@ -62,7 +62,7 @@ async def keyword_extractor_node(state: PipelineState) -> dict:
         return {"keywords": user_keywords}
 
     llm = ChatOpenAI(
-        model=settings.OPENAI_MODEL,
+        model=settings.OPENAI_MODEL_LIGHT,
         temperature=0.4 if is_retry else 0.2,  # more creative on retry
         api_key=settings.OPENAI_API_KEY,
     ).with_structured_output(_KeywordsOutput)

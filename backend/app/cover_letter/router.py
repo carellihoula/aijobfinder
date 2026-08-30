@@ -115,7 +115,7 @@ async def get_cover_letter(
         raise HTTPException(status_code=404, detail="No cover letter generated yet for this offer")
 
     content = CoverLetterContent(**stored.content)
-    pdf_bytes = render_pdf(content, body_text=stored.edited_body)
+    pdf_bytes = await render_pdf(content, body_text=stored.edited_body)
 
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
@@ -155,7 +155,7 @@ async def create_cover_letter(
         previous_content=previous_content,
         gender=gender,
     )
-    pdf_bytes = render_pdf(content)
+    pdf_bytes = await render_pdf(content)
 
     await cover_letter_svc.upsert_cover_letter(db, analysis_id, job_index, content.model_dump())
 
@@ -320,7 +320,7 @@ async def export_cover_letter_pdf(
         raise HTTPException(status_code=404, detail="No cover letter generated yet for this offer")
 
     content = CoverLetterContent(**updated.content)
-    pdf_bytes = render_pdf(content, body_text=body.text)
+    pdf_bytes = await render_pdf(content, body_text=body.text)
     company_slug = (content.recipient.company_name or "company").replace(" ", "_").lower()
 
     return StreamingResponse(

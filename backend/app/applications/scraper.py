@@ -77,7 +77,7 @@ If a field cannot be found, use an empty string.\
 
 async def extract_job(text: str) -> _JobExtract:
     """Extract title/company/location/summary from raw job posting text via structured LLM output."""
-    llm = ChatOpenAI(model=settings.OPENAI_MODEL, temperature=0, api_key=settings.OPENAI_API_KEY)
+    llm = ChatOpenAI(model=settings.OPENAI_MODEL_LIGHT, temperature=0, api_key=settings.OPENAI_API_KEY)
     structured_llm = llm.with_structured_output(_JobExtract)
 
     messages = [

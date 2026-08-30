@@ -26,7 +26,7 @@ async def cv_structurer_node(state: PipelineState) -> dict:
     """Node 2 - Force the LLM to return a strict CVSchema JSON via structured output."""
 
     llm = ChatOpenAI(
-        model=settings.OPENAI_MODEL,
+        model=settings.OPENAI_MODEL_LIGHT,
         temperature=0,
         api_key=settings.OPENAI_API_KEY,
     )

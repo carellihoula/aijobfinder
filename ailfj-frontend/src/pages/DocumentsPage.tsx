@@ -81,6 +81,7 @@ export default function DocumentsPage() {
   const [showAll, setShowAll]         = useState(false)
   const [query, setQuery]             = useState("")
   const [mobileListOpen, setMobileListOpen] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
   const [letterBody, setLetterBody]   = useState("")
   // Tiptap only reads `content` at mount time - bump this to force the editor to
   // remount (and pick up fresh text) after a load/regenerate, without remounting
@@ -375,6 +376,7 @@ export default function DocumentsPage() {
       // Flush the pending autosave first, then export whatever text is in the
       // editor right now - this is the only point a PDF is ever produced.
       if (saveBodyTimer.current) { clearTimeout(saveBodyTimer.current); saveBodyTimer.current = null }
+      setIsExporting(true)
       try {
         const blob = active.source === "application"
           ? await exportApplicationCoverLetterPdf(active.applicationId ?? "", letterBody)
@@ -387,6 +389,8 @@ export default function DocumentsPage() {
         URL.revokeObjectURL(url)
       } catch (e) {
         console.error("[Documents] export failed:", e)
+      } finally {
+        setIsExporting(false)
       }
       return
     }
@@ -436,10 +440,10 @@ export default function DocumentsPage() {
         <Sparkles className="h-3.5 w-3.5" />
         <span className="hidden sm:inline">Affiner avec l'IA</span>
       </button>
-      <button onClick={handleDownload}
-        className="btn-accent ring-focus flex items-center gap-1.5 rounded-lg px-3 h-8 text-[12px] font-medium shrink-0">
-        <Download className="h-3.5 w-3.5" />
-        <span className="hidden sm:inline">Exporter en PDF</span>
+      <button onClick={handleDownload} disabled={isExporting}
+        className="btn-accent ring-focus flex items-center gap-1.5 rounded-lg px-3 h-8 text-[12px] font-medium shrink-0 disabled:opacity-60">
+        {isExporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+        <span className="hidden sm:inline">{isExporting ? "Export en cours..." : "Exporter en PDF"}</span>
       </button>
       {active && (
         <button onClick={() => handleRemoveDoc(active)}
@@ -690,10 +694,10 @@ export default function DocumentsPage() {
                         )}
 
                         {/* Download */}
-                        <button onClick={handleDownload}
-                          className="btn-accent ring-focus flex items-center gap-1.5 rounded-lg px-3 h-8 text-[12px] font-medium shrink-0">
-                          <Download className="h-3.5 w-3.5" />
-                          <span className="hidden sm:inline">Télécharger</span>
+                        <button onClick={handleDownload} disabled={isExporting}
+                          className="btn-accent ring-focus flex items-center gap-1.5 rounded-lg px-3 h-8 text-[12px] font-medium shrink-0 disabled:opacity-60">
+                          {isExporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                          <span className="hidden sm:inline">{isExporting ? "Export en cours..." : "Télécharger"}</span>
                         </button>
                       </>
                     )}

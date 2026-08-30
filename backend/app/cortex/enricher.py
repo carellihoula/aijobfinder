@@ -43,7 +43,31 @@ class _EnrichOutput(BaseModel):
     jobs: list[_JobEnrichment]
 
 
-async def _enrich_batch(llm, batch: list[dict], batch_idx: int) -> list[dict]:
+def _build_llms():
+    """Primary LLM is Gemini Flash-Lite (free tier) when configured - this task
+    (seniority + skills extraction on public job postings) is high-volume and
+    low-stakes. Falls back to OPENAI_MODEL_LIGHT per-batch on any Gemini
+    failure (quota, auth, malformed output, ...), or straight to it when no
+    Gemini key is set - a simple extraction task, no need for a bigger model."""
+    openai_llm = ChatOpenAI(
+        model=settings.OPENAI_MODEL_LIGHT,
+        temperature=0,
+        api_key=settings.OPENAI_API_KEY,
+    ).with_structured_output(_EnrichOutput)
+
+    gemini_llm = None
+    if settings.GOOGLE_API_KEY:
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        gemini_llm = ChatGoogleGenerativeAI(
+            model=settings.GEMINI_MODEL,
+            temperature=0,
+            google_api_key=settings.GOOGLE_API_KEY,
+        ).with_structured_output(_EnrichOutput)
+
+    return gemini_llm, openai_llm
+
+
+async def _enrich_batch(gemini_llm, openai_llm, batch: list[dict], batch_idx: int) -> list[dict]:
     jobs_text = "\n\n".join(
         f"[{i}] {j['title']} @ {j['company']}\n{j.get('desc', '')[:DESC_CHARS_FOR_ENRICHMENT]}"
         for i, j in enumerate(batch)
@@ -52,37 +76,46 @@ async def _enrich_batch(llm, batch: list[dict], batch_idx: int) -> list[dict]:
         SystemMessage(content=SYSTEM_PROMPT),
         HumanMessage(content=jobs_text),
     ]
-    try:
-        result: _EnrichOutput = await llm.ainvoke(messages)
-        enriched = [dict(j) for j in batch]
-        for meta in result.jobs:
-            if meta.index < len(enriched):
-                enriched[meta.index]["seniority"] = meta.seniority
-                enriched[meta.index]["skills"] = meta.skills
-        return enriched
-    except Exception as exc:
-        logger.warning("[enricher] Batch %d failed: %s - storing without enrichment", batch_idx, exc)
-        return batch
+
+    result: _EnrichOutput | None = None
+    if gemini_llm is not None:
+        try:
+            result = await gemini_llm.ainvoke(messages)
+        except Exception as exc:
+            logger.warning("[enricher] Batch %d - Gemini failed (%s), falling back to OpenAI", batch_idx, exc)
+
+    if result is None:
+        try:
+            result = await openai_llm.ainvoke(messages)
+        except Exception as exc:
+            logger.warning("[enricher] Batch %d failed on both providers: %s - storing without enrichment", batch_idx, exc)
+            return batch
+
+    enriched = [dict(j) for j in batch]
+    for meta in result.jobs:
+        if meta.index < len(enriched):
+            enriched[meta.index]["seniority"] = meta.seniority
+            enriched[meta.index]["skills"] = meta.skills
+    return enriched
 
 
 async def enrich_jobs(jobs: list[dict]) -> list[dict]:
     """Tag each job with seniority and extract its required skills, in one
-    batched LLM pass - both pieces of info come from reading the same posting,
-    no point paying for two separate calls."""
+    batched LLM pass per provider - both pieces of info come from reading the
+    same posting, no point paying for two separate calls."""
     if not jobs:
         return []
 
-    llm = ChatOpenAI(
-        model=settings.OPENAI_MODEL,
-        temperature=0,
-        api_key=settings.OPENAI_API_KEY,
-    ).with_structured_output(_EnrichOutput)
+    gemini_llm, openai_llm = _build_llms()
 
     batches = [jobs[i:i + BATCH_SIZE] for i in range(0, len(jobs), BATCH_SIZE)]
-    logger.info("[enricher] %d jobs → %d batches for seniority + skills extraction", len(jobs), len(batches))
+    logger.info(
+        "[enricher] %d jobs → %d batches for seniority + skills extraction (primary=%s)",
+        len(jobs), len(batches), "gemini" if gemini_llm else "openai",
+    )
 
     results = await asyncio.gather(
-        *[_enrich_batch(llm, batch, i) for i, batch in enumerate(batches)],
+        *[_enrich_batch(gemini_llm, openai_llm, batch, i) for i, batch in enumerate(batches)],
         return_exceptions=True,
     )
 

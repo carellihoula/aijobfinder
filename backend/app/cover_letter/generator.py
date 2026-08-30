@@ -7,6 +7,7 @@ from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 
 from app.config import settings
+from app.cover_letter.backends.weasyprint_backend import render as _render_pdf
 from app.logger import get_logger
 
 _FRENCH_MONTHS = [
@@ -148,7 +149,7 @@ async def generate_cover_letter(
     ravi_form = "ravie" if gender == "female" else "ravi"
 
     llm = ChatOpenAI(
-        model=settings.OPENAI_MODEL,
+        model=settings.OPENAI_MODEL_QUALITY,
         temperature=0.4,
         api_key=settings.OPENAI_API_KEY,
     ).with_structured_output(CoverLetterContent)
@@ -179,15 +180,22 @@ async def generate_cover_letter(
     return content
 
 
-def render_pdf(content: CoverLetterContent, body_text: str | None = None) -> bytes:
+async def render_pdf(content: CoverLetterContent, body_text: str | None = None) -> bytes:
     """Renders the full letter to PDF via WeasyPrint, from real HTML/CSS - the
     same markup SimpleEditor shows, so formatting (bold, links, highlight,
     alignment, lists...) matches exactly. `body_text` is the user-edited HTML
     (already the full letter, header included) when present; otherwise the
-    letter is built fresh from `content` via letter_html()."""
-    from app.cover_letter.backends.weasyprint_backend import render
+    letter is built fresh from `content` via letter_html().
 
-    return render(body_text if body_text is not None else letter_html(content))
+    WeasyPrint's actual rendering is synchronous and CPU-bound (HTML/CSS
+    layout via Pango/Cairo) - running it directly in an `async def` route
+    handler would block the whole event loop for its full duration, stalling
+    every other concurrent request on the API, not just this one. Offloaded to
+    a thread so the event loop stays free."""
+    from starlette.concurrency import run_in_threadpool
+
+    html = body_text if body_text is not None else letter_html(content)
+    return await run_in_threadpool(_render_pdf, html)
 
 
 def letter_body_text(content: CoverLetterContent) -> str:

@@ -149,7 +149,7 @@ async def llm_reranker_node(state: PipelineState) -> dict:
     )
 
     llm = ChatOpenAI(
-        model=settings.OPENAI_MODEL,
+        model=settings.OPENAI_MODEL_LIGHT,
         temperature=0,
         api_key=settings.OPENAI_API_KEY,
     )

@@ -117,7 +117,7 @@ async def download_cover_letter(
         raise HTTPException(status_code=409, detail=f"Cover letter not ready (status: {application.cover_letter_status})")
 
     content = CoverLetterContent(**application.cover_letter_content)
-    pdf_bytes = render_pdf(content)
+    pdf_bytes = await render_pdf(content)
     content_b64 = base64.b64encode(json.dumps(application.cover_letter_content).encode()).decode()
 
     return StreamingResponse(
@@ -193,7 +193,7 @@ async def export_cover_letter_pdf(
         raise HTTPException(status_code=404, detail="No cover letter generated yet for this application")
 
     content = CoverLetterContent(**updated.cover_letter_content)
-    pdf_bytes = render_pdf(content, body_text=body.text)
+    pdf_bytes = await render_pdf(content, body_text=body.text)
 
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
