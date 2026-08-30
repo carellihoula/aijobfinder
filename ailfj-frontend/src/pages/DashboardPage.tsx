@@ -363,8 +363,13 @@ export default function DashboardPage() {
   if (analysisLoading || (is404 && cvCheckLoading) || (is404 && noCv)) {
     return (
       <Layout>
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
-          <MatchSkeletonList count={3} />
+        {/* Same wide container as the real grid below (max-w-400, not the
+            narrower max-w-3xl used by the "processing"/error states) - the
+            common case on reload is an existing user with existing results,
+            so the skeleton should already be shaped like that grid instead
+            of reflowing into columns the moment real data arrives. */}
+        <div className="mx-auto px-4 sm:px-6 py-8 max-w-400">
+          <MatchSkeletonList count={6} />
         </div>
       </Layout>
     )
