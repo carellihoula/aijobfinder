@@ -516,10 +516,11 @@ function AuthAvatar({ avatarKey, avatarUrl, className }: {
 // ─── CV re-upload modal ───────────────────────────────────────────────────────
 type CvUploadPhase = "confirm" | "uploading" | "extracting" | "error"
 
-function CvUpdateModal({ onConfirm, onCancel, phase }: {
+function CvUpdateModal({ onConfirm, onCancel, phase, errorMessage }: {
   onConfirm: () => void
   onCancel: () => void
   phase: CvUploadPhase
+  errorMessage?: string | null
 }) {
   const busy = phase === "uploading" || phase === "extracting"
 
@@ -548,7 +549,7 @@ function CvUpdateModal({ onConfirm, onCancel, phase }: {
 
         {phase === "error" && (
           <div className="rounded-xl border border-rose-500/20 bg-rose-500/5 p-4 text-[12.5px] text-rose-600 dark:text-rose-400">
-            L'extraction a échoué ou a pris trop de temps. Vérifiez que le worker Celery est actif, puis réessayez.
+            {errorMessage ?? "L'extraction a échoué ou a pris trop de temps. Vérifiez que le worker Celery est actif, puis réessayez."}
           </div>
         )}
 
@@ -1372,6 +1373,7 @@ export default function ProfilePage() {
   const initialized = useRef(false)
   const [cvPendingFile, setCvPendingFile] = useState<File | null>(null)
   const [cvPhase, setCvPhase] = useState<"confirm" | "uploading" | "extracting" | "error">("confirm")
+  const [cvErrorMessage, setCvErrorMessage] = useState<string | null>(null)
   const [launching, setLaunching] = useState(false)
   // Set from a 429 this session's own request received, or proactively computed
   // below from the already-loaded analysis - never persisted (no localStorage),
@@ -1443,16 +1445,16 @@ export default function ProfilePage() {
       }
       // New PDF - wait for extraction via SSE (3 min timeout)
       setCvPhase("extracting")
-      const extracted = await new Promise<boolean>((resolve) => {
+      const result = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
         const ctrl = new AbortController()
-        const timer = setTimeout(() => { ctrl.abort(); resolve(false) }, 3 * 60 * 1000)
+        const timer = setTimeout(() => { ctrl.abort(); resolve({ ok: false }) }, 3 * 60 * 1000)
         const run = async () => {
           try {
             const r = await fetch(`/api/analysis/init-stream/${cv_id}`, {
               credentials: "include",
               signal: ctrl.signal,
             })
-            if (!r.ok || !r.body) { clearTimeout(timer); resolve(false); return }
+            if (!r.ok || !r.body) { clearTimeout(timer); resolve({ ok: false }); return }
             const reader  = r.body.getReader()
             const decoder = new TextDecoder()
             let buf = ""
@@ -1467,23 +1469,28 @@ export default function ProfilePage() {
                 if (!data) continue
                 try {
                   const event = JSON.parse(data)
-                  if (event.done) { clearTimeout(timer); resolve(true); return }
+                  if (event.done) {
+                    clearTimeout(timer)
+                    resolve(event.error ? { ok: false, error: event.error } : { ok: true })
+                    return
+                  }
                 } catch { /* ignore */ }
               }
             }
           } catch { /* aborted or network error */ }
           clearTimeout(timer)
-          resolve(false)
+          resolve({ ok: false })
         }
         run()
       })
-      if (extracted) {
+      if (result.ok) {
         await queryClient.refetchQueries({ queryKey: QK.cvData })
         const fresh = queryClient.getQueryData<CvData>(QK.cvData)
         if (fresh) setCv(fresh)
         setCvPendingFile(null)
         setCvPhase("confirm")
       } else {
+        setCvErrorMessage(result.error ?? null)
         setCvPhase("error")
       }
     } catch {
@@ -1545,6 +1552,7 @@ export default function ProfilePage() {
           onConfirm={handleCvConfirm}
           onCancel={() => { setCvPendingFile(null); setCvPhase("confirm") }}
           phase={cvPhase}
+          errorMessage={cvErrorMessage}
         />
       )}
       <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">

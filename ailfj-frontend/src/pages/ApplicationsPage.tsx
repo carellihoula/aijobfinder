@@ -652,7 +652,7 @@ export default function ApplicationsPage() {
           onClick={() => setShowAdd(true)}
           className="btn-accent ring-focus rounded-lg px-3 py-1.5 text-[12px] font-medium flex items-center gap-1.5"
         >
-          <Plus className="h-3.5 w-3.5" /> Nouvelle candidature
+          <Plus className="h-3.5 w-3.5" /> Importer une offre (URL ou texte)
         </button>
       }
     >

@@ -59,3 +59,25 @@ def decode_typed_token(token: str, expected_type: str) -> Optional[str]:
     if payload.get("type") != expected_type:
         return None
     return payload.get("sub")
+
+
+def password_reset_fingerprint(password_hash: str | None) -> str:
+    """One-way fingerprint of a password hash - embedded in reset tokens
+    instead of the hash itself (which must never end up inside a token that
+    can land in email logs, proxies, or browser history). Comparing this
+    fingerprint at redemption time against the user's *current* hash makes a
+    reset token invalidate itself the instant the password actually changes -
+    whether via this token or a different one issued earlier - without
+    needing a DB table to track which tokens were already redeemed."""
+    return hashlib.sha256((password_hash or "").encode()).hexdigest()[:16]
+
+
+def create_reset_token(user_id: str, current_password_hash: str | None) -> str:
+    return create_access_token(
+        {
+            "sub": user_id,
+            "type": "reset",
+            "pwfp": password_reset_fingerprint(current_password_hash),
+        },
+        expires_delta=timedelta(minutes=60),
+    )

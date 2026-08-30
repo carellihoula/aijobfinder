@@ -2,7 +2,28 @@ import { useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { uploadCV, getCvData } from "../api/analysis"
 import Dropzone from "../components/Dropzone"
-import { CheckCircle2 } from "lucide-react"
+import { CheckCircle2, AlertTriangle, XCircle } from "lucide-react"
+
+// Self-contained - no shared toast system in this codebase yet, and this is
+// the only place on this page that needs one.
+function Toast({ message, onClose }: { message: string; onClose: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onClose, 6000)
+    return () => clearTimeout(t)
+  }, [onClose])
+
+  return (
+    <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 animate-fade-up">
+      <div className="flex items-center gap-2.5 rounded-xl px-4 py-3 text-[13px] font-medium bg-rose-500/10 text-rose-500 border border-rose-500/20 shadow-lg">
+        <AlertTriangle className="h-4 w-4 shrink-0" />
+        {message}
+        <button onClick={onClose} className="ml-1 text-rose-500/70 hover:text-rose-500 transition">
+          <XCircle className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  )
+}
 
 const INIT_NODE_LABELS: Record<string, string> = {
   pdf_parser:    "Lecture du CV…",
@@ -21,6 +42,7 @@ export default function OnboardingPage() {
   const [step, setStep]       = useState("Préparation…")
   const [checking, setChecking] = useState(true)
   const [error, setError]     = useState<string | null>(null)
+  const [toast, setToast]     = useState<string | null>(null)
   const navigate              = useNavigate()
   const sseRef                = useRef<AbortController | null>(null)
 
@@ -63,6 +85,14 @@ export default function OnboardingPage() {
                 setStep(INIT_NODE_LABELS[event.node] ?? event.node)
               }
               if (event.done) {
+                if (event.error) {
+                  // Stay on this same upload page instead of advancing -
+                  // the document was rejected (not a CV, or a technical
+                  // failure), the user needs to pick a different file.
+                  setToast(event.error)
+                  setPhase("upload")
+                  return
+                }
                 setProgress(100)
                 setStep("Profil initialisé !")
                 setPhase("done")
@@ -113,6 +143,8 @@ export default function OnboardingPage() {
 
   return (
     <div className="min-h-screen bg-[rgb(var(--bg))] flex flex-col">
+      {toast && <Toast message={toast} onClose={() => setToast(null)} />}
+
       {/* Top bar */}
       <header className="h-14 border-b border-line/10 flex items-center px-6">
         <div className="flex items-center gap-2">

@@ -48,8 +48,8 @@ async def publish(analysis_id: str, node: str) -> None:
         await pipe.execute()
 
 
-async def publish_done(analysis_id: str) -> None:
-    raw = json.dumps({"done": True})
+async def publish_done(analysis_id: str, error: str | None = None) -> None:
+    raw = json.dumps({"done": True, "error": error} if error else {"done": True})
     async with _r() as r:
         pipe = r.pipeline()
         pipe.rpush(_HISTORY.format(analysis_id), raw)

@@ -18,8 +18,17 @@ Rules:
 - Detect all spoken languages and their level (A1 to C2 or native).
 - List hobbies/interests if mentioned.
 - Infer the seniority level from total experience and roles.
-- If a field is not found in the CV, leave it as null or empty list.\
+- If a field is not found in the CV, leave it as null or empty list.
+- Set is_cv to false if the text is clearly not a CV/resume at all (an
+  invoice, a random letter, an unrelated document, gibberish) - don't force
+  a match just because a few fields could technically be filled in.\
 """
+
+
+class NotACVError(ValueError):
+    """Raised when the uploaded document's extracted text isn't actually a
+    CV - caught specifically in worker/tasks.py to surface a clear,
+    user-facing message instead of the generic pipeline-failure one."""
 
 
 async def cv_structurer_node(state: PipelineState) -> dict:
@@ -42,6 +51,15 @@ async def cv_structurer_node(state: PipelineState) -> dict:
 
     logger.info("[cv_structurer] Structuring CV (%d chars) ...", len(state["cv_text"]))
     result: CVSchema = await structured_llm.ainvoke(messages)
+
+    # Belt and suspenders: trust the LLM's own is_cv judgment, but also treat
+    # a schema that came back completely empty (no name, no skills, no
+    # experiences, no roles) as "not a CV" even if the model didn't flag it -
+    # a real CV, however thin, always has at least one of these.
+    looks_empty = not (result.full_name or result.skills or result.experiences or result.roles)
+    if not result.is_cv or looks_empty:
+        logger.warning("[cv_structurer] Document rejected - doesn't look like a CV")
+        raise NotACVError("NOT_A_CV")
 
     logger.info(
         "[cv_structurer] Parsed - name=%s, skills=%d, experiences=%d, level=%s",

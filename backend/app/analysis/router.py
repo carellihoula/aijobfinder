@@ -47,6 +47,13 @@ async def upload_cv(
     if len(content) > settings.MAX_FILE_SIZE_MB * 1024 * 1024:
         raise HTTPException(status_code=413, detail=f"File exceeds {settings.MAX_FILE_SIZE_MB} MB limit")
 
+    # The ".pdf" extension check above is just a filename string - trivially
+    # renamed. Every real PDF starts with this exact magic-byte signature
+    # regardless of extension, so this is what actually confirms the content
+    # is a PDF rather than something else wearing a .pdf name.
+    if not content.startswith(b"%PDF-"):
+        raise HTTPException(status_code=400, detail="File is not a valid PDF")
+
     # Dedup: compare only against the user's current latest CV.
     # A match against any older CV is irrelevant - the user may have since changed CVs.
     pdf_hash = hashlib.sha256(content).hexdigest()

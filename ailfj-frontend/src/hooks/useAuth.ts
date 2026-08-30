@@ -11,8 +11,17 @@ export function useAuth() {
     try {
       await authApi.login(email, password)
       return true
-    } catch {
-      setError('Email ou mot de passe incorrect')
+    } catch (e: unknown) {
+      // 429 = rate-limited (see backend/app/auth/rate_limit.py) - show the
+      // real "try again in Xmin" message, not the generic wrong-password one,
+      // otherwise a locked-out user with the *correct* password just thinks
+      // they're mistyping it.
+      const err = e as { response?: { status?: number; data?: { detail?: string } } }
+      if (err.response?.status === 429 && err.response.data?.detail) {
+        setError(err.response.data.detail)
+      } else {
+        setError('Email ou mot de passe incorrect')
+      }
       return false
     } finally {
       setLoading(false)

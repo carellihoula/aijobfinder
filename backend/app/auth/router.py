@@ -4,13 +4,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import service
 from app.auth.dependencies import get_current_user
+from app.auth.rate_limit import check_login_rate_limit, clear_login_rate_limit, record_failed_login
 from app.auth.schemas import GoogleAuthRequest, LoginRequest, RegisterRequest
-from app.auth.utils import create_access_token, create_typed_token, decode_typed_token, hash_password
+from app.auth.utils import (
+    create_access_token,
+    create_reset_token,
+    create_typed_token,
+    decode_token,
+    decode_typed_token,
+    hash_password,
+    password_reset_fingerprint,
+)
 from app.config import settings
 from app.db.session import get_db
 from app.email import send_reset_email, send_verification_email
 from app.users.models import User
-from app.users.service import get_user_by_email, update_user_password, verify_user
+from app.users.service import get_user_by_email, get_user_by_id, update_user_password, verify_user
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -59,8 +68,15 @@ async def register(data: RegisterRequest, response: Response, db: AsyncSession =
 
 
 @router.post("/login")
-async def login(data: LoginRequest, response: Response, db: AsyncSession = Depends(get_db)):
-    user = await service.login(db, data)
+async def login(data: LoginRequest, request: Request, response: Response, db: AsyncSession = Depends(get_db)):
+    ip = request.client.host if request.client else "unknown"
+    await check_login_rate_limit(data.email, ip)
+    try:
+        user = await service.login(db, data)
+    except HTTPException:
+        await record_failed_login(data.email, ip)
+        raise
+    await clear_login_rate_limit(data.email)
     await _issue_tokens(response, db, user)
     return {"ok": True}
 
@@ -140,7 +156,10 @@ class ResetPasswordRequest(BaseModel):
 async def forgot_password(data: ForgotPasswordRequest, db: AsyncSession = Depends(get_db)):
     user = await get_user_by_email(db, data.email)
     if user:
-        token = create_typed_token(str(user.id), "reset", expires_minutes=60)
+        # Fingerprints the *current* password hash into the token so it stops
+        # validating the instant the password actually changes - see
+        # reset_password below and password_reset_fingerprint's docstring.
+        token = create_reset_token(str(user.id), user.hashed_password)
         await send_reset_email(user.email, token)
     # Always return ok - don't leak whether the email exists
     return {"ok": True}
@@ -151,8 +170,18 @@ async def reset_password(data: ResetPasswordRequest, db: AsyncSession = Depends(
     from uuid import UUID
     if len(data.new_password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
-    user_id = decode_typed_token(data.token, "reset")
-    if not user_id:
+
+    payload = decode_token(data.token)
+    if not payload or payload.get("type") != "reset":
         raise HTTPException(status_code=400, detail="Invalid or expired reset link")
-    await update_user_password(db, UUID(user_id), hash_password(data.new_password))
+
+    user = await get_user_by_id(db, UUID(payload["sub"]))
+    # Effectively single-use: this link's fingerprint only matches the
+    # password hash that was current when it was issued. Once a reset
+    # succeeds (via this link or another one requested earlier), the hash
+    # changes and every outstanding reset link for this user stops working.
+    if not user or payload.get("pwfp") != password_reset_fingerprint(user.hashed_password):
+        raise HTTPException(status_code=400, detail="Invalid or expired reset link")
+
+    await update_user_password(db, user.id, hash_password(data.new_password))
     return {"ok": True}

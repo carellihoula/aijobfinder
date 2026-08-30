@@ -1,7 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 
-from app.auth.dependencies import get_current_user
-from app.config import settings
+from app.auth.dependencies import get_admin_user, get_current_user
 from app.cortex import service as cortex_svc
 from app.cortex.db import CortexSessionLocal
 from app.cortex.schemas import CortexStatsResponse, IngestionResponse
@@ -12,15 +11,8 @@ router = APIRouter(prefix="/cortex", tags=["Cortex"])
 logger = get_logger(__name__)
 
 
-def _require_admin(current_user: User = Depends(get_current_user)) -> User:
-    admin_emails = [e.strip() for e in settings.ADMIN_EMAILS.split(",") if e.strip()]
-    if admin_emails and current_user.email not in admin_emails:
-        raise HTTPException(status_code=403, detail="Admin access required")
-    return current_user
-
-
 @router.post("/ingest/full", response_model=IngestionResponse, status_code=202)
-async def ingest_full(_: User = Depends(_require_admin)):
+async def ingest_full(_: User = Depends(get_admin_user)):
     """Enqueue a full Cortex ingestion via Celery (all providers). Admin only."""
     from app.worker.tasks import full_ingestion
     task = full_ingestion.delay()
@@ -31,7 +23,7 @@ async def ingest_full(_: User = Depends(_require_admin)):
 @router.delete("/jobs/cleanup", response_model=dict)
 async def cleanup_old_jobs(
     days: int = 30,
-    _: User = Depends(_require_admin),
+    _: User = Depends(get_admin_user),
 ):
     """Enqueue cleanup of jobs not seen in the last N days. Admin only."""
     from app.worker.tasks import cleanup_old_jobs as cleanup_task

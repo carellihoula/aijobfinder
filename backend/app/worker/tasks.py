@@ -94,7 +94,17 @@ def init_profile(self, cv_id: str, user_id: str, pdf_path: str) -> dict:
             logger.info("[init_profile] completed - cv_id=%s", cv_id)
 
         except Exception as exc:
-            await prog.publish_done(cv_id)
+            from app.pipeline.nodes.cv_structurer import NotACVError
+
+            # Distinguish "this document isn't a CV" (clear, actionable
+            # message) from any other pipeline failure (generic - never leak
+            # raw exception/SQL details to the client, see run_search's own
+            # except block for the same reasoning).
+            if isinstance(exc, NotACVError):
+                error_message = "Ce document ne semble pas être un CV. Merci d'en soumettre un valide."
+            else:
+                error_message = "Une erreur technique est survenue pendant l'analyse. Vous pouvez réessayer."
+            await prog.publish_done(cv_id, error=error_message)
             logger.error("[init_profile] failed - cv_id=%s | %s", cv_id, exc, exc_info=True)
 
     _dispose_engines()

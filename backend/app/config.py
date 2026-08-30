@@ -25,10 +25,6 @@ class Settings(BaseSettings):
     # Comma-separated list of allowed CORS origins, e.g. "http://localhost:5173,https://myapp.com"
     ALLOWED_ORIGINS: str = "http://localhost:5173,http://localhost:3000"
 
-    # Comma-separated list of admin emails that can access /cortex/ingest and /cortex/jobs/cleanup
-    # Leave empty to allow ALL authenticated users (only safe in dev/local setups)
-    ADMIN_EMAILS: str = ""
-
     OPENAI_API_KEY: str = ""
     # LIGHT: extraction/classification/summarization tasks (CV parsing, keyword
     # extraction, job-posting scraping, LLM reranking, report generation, and

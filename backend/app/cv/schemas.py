@@ -48,3 +48,12 @@ class CVSchema(BaseModel):
     level: Literal["junior", "mid", "senior", "lead", "principal"] = Field(
         default="mid", description="Inferred seniority level"
     )
+    is_cv: bool = Field(
+        default=True,
+        description=(
+            "False if the input text is clearly not a CV/resume - e.g. an "
+            "invoice, a random document, an unrelated letter, gibberish. "
+            "True whenever it's genuinely a CV, even a very short or "
+            "incomplete one."
+        ),
+    )
