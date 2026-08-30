@@ -29,6 +29,7 @@ export interface MatchFilters {
   mode: WorkMode | "all"
   minScore: number
   sort: "score" | "recent" | "salary"
+  search: string
 }
 
 export const DEFAULT_FILTERS: MatchFilters = {
@@ -36,14 +37,17 @@ export const DEFAULT_FILTERS: MatchFilters = {
   mode: "all",
   minScore: 0,
   sort: "score",
+  search: "",
 }
 
 export function applyFilters(list: DesignJobMatch[], f: MatchFilters): DesignJobMatch[] {
+  const query = f.search.trim().toLowerCase()
   const out = list.filter(
     (m) =>
       (f.contract === "all" || m.contract === f.contract) &&
       (f.mode === "all" || m.mode === f.mode) &&
-      m.score >= f.minScore
+      m.score >= f.minScore &&
+      (query === "" || m.title.toLowerCase().includes(query) || m.company.toLowerCase().includes(query))
   )
   if (f.sort === "score")  out.sort((a, b) => b.score - a.score)
   if (f.sort === "recent") out.sort((a, b) => (a.postedDays ?? 0) - (b.postedDays ?? 0))

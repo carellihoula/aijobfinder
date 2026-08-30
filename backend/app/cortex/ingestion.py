@@ -5,7 +5,7 @@ from langchain_openai import OpenAIEmbeddings
 from app.config import settings
 from app.cortex import service as cortex_svc
 from app.cortex.db import CortexSessionLocal
-from app.cortex.enricher import enrich_seniority
+from app.cortex.enricher import enrich_jobs
 from app.cortex.providers.base import JobProvider, RawJob
 from app.logger import get_logger
 
@@ -73,7 +73,7 @@ async def run_provider_ingestion(provider: JobProvider) -> dict:
     if not new_pairs:
         return {"fetched": len(raw_jobs), "new": 0, "stored": 0}
 
-    # ── 4. Enrich seniority ───────────────────────────────────────────────────
+    # ── 4. Enrich (seniority + skills) ────────────────────────────────────────
     jobs_dict = [
         {
             "title":         job.title,
@@ -88,34 +88,46 @@ async def run_provider_ingestion(provider: JobProvider) -> dict:
         }
         for job, h in new_pairs
     ]
-    enriched = await enrich_seniority(jobs_dict)
+    enriched = await enrich_jobs(jobs_dict)
 
     # ── 5. Embed ──────────────────────────────────────────────────────────────
+    # Two vectors per job instead of one blob - "skills" (title + extracted
+    # skills) and "context" (raw description) - see CortexJob.embedding_skills
+    # for why. Both batches go out in a single API call.
     logger.info("[ingestion:%s] Embedding %d jobs ...", provider.name, len(enriched))
     embedder = OpenAIEmbeddings(
         model=settings.OPENAI_EMBEDDING_MODEL,
         api_key=settings.OPENAI_API_KEY,
     )
-    texts = [f"{j['title']} {j['desc']}".strip() for j in enriched]
-    embeddings = await embedder.aembed_documents(texts)
+    skills_texts = [
+        f"{j['title']} " + ", ".join(j.get("skills") or [])
+        for j in enriched
+    ]
+    context_texts = [j["desc"] for j in enriched]
+    all_embeddings = await embedder.aembed_documents(skills_texts + context_texts)
+    n = len(enriched)
+    skills_embeddings = all_embeddings[:n]
+    context_embeddings = all_embeddings[n:]
 
     # ── 6. Store ──────────────────────────────────────────────────────────────
     stored = 0
     async with CortexSessionLocal() as db:
-        for job_d, emb in zip(enriched, embeddings):
+        for job_d, skills_emb, context_emb in zip(enriched, skills_embeddings, context_embeddings):
             try:
                 await cortex_svc.upsert_job(db, {
-                    "job_hash":      job_d["job_hash"],
-                    "title":         job_d["title"],
-                    "company":       job_d["company"],
-                    "location":      job_d["location"],
-                    "description":   job_d["desc"],
-                    "url":           job_d["url"],
-                    "source":        job_d["source"],
-                    "contract_type": job_d["contract_type"],
-                    "remote":        job_d["remote"],
-                    "seniority":     job_d.get("seniority", ""),
-                    "embedding":     emb,
+                    "job_hash":            job_d["job_hash"],
+                    "title":               job_d["title"],
+                    "company":             job_d["company"],
+                    "location":            job_d["location"],
+                    "description":         job_d["desc"],
+                    "url":                 job_d["url"],
+                    "source":              job_d["source"],
+                    "contract_type":       job_d["contract_type"],
+                    "remote":              job_d["remote"],
+                    "seniority":           job_d.get("seniority", ""),
+                    "skills":              job_d.get("skills") or [],
+                    "embedding_skills":    skills_emb,
+                    "embedding_context":   context_emb,
                 })
                 stored += 1
             except Exception as exc:

@@ -63,38 +63,45 @@ async def search_jobs(
     limit: int = 100,
     contract_type: str = "",
     remote: bool = False,
-    seniority: str = "",
     locations: list[str] | None = None,
 ) -> list[dict]:
     """
     Fused multi-vector similarity search.
 
     `query_vectors` holds the CV split into separate embeddings:
-    - "competences" (required, used as the ANN pre-filter anchor), "summary",
-      "formations": one embedding vector each (list[float])
+    - "skills" (required, used as the ANN pre-filter anchor), "summary",
+      "education": one embedding vector each (list[float])
     - "experiences": a list of embedding vectors (list[list[float]]), one per
       recent job with a real description - pooled by taking the single closest
       match (MIN distance) rather than averaging, so one strong past experience
       is enough even if the others are unrelated.
 
-    Any key can be missing (e.g. no summary on the CV) - its weight is simply
-    redistributed across whichever vectors are present.
+    Each job has two vectors of its own (`embedding_skills`: title + LLM-
+    extracted skills; `embedding_context`: raw description). Every CV facet is
+    compared against BOTH and the closer one wins (LEAST over both), rather
+    than hard-mapping a facet to a single "correct" job vector.
+
+    Any CV key can be missing (e.g. no summary on the CV) - its weight is
+    simply redistributed across whichever vectors are present.
 
     Hard filters on explicit user preferences:
     - contract_type: user explicitly chose a contract type
     - remote: user explicitly wants remote
-    - seniority: user explicitly chose a level - LLM-tagged at ingestion
     - locations: ILIKE filter - None means no filter (all France)
     """
-    if "competences" not in query_vectors:
-        raise ValueError("query_vectors must at least contain 'competences'")
+    if "skills" not in query_vectors:
+        raise ValueError("query_vectors must at least contain 'skills'")
 
     present_weights = {k: VECTOR_WEIGHTS[k] for k in query_vectors if k in VECTOR_WEIGHTS}
     total_weight = sum(present_weights.values())
 
-    conditions = ["is_active = true", "embedding IS NOT NULL"]
+    conditions = [
+        "is_active = true",
+        "embedding_skills IS NOT NULL",
+        "embedding_context IS NOT NULL",
+    ]
     params: dict = {
-        "emb_competences": json.dumps(query_vectors["competences"]),
+        "emb_skills": json.dumps(query_vectors["skills"]),
         "prefilter_limit": max(ANN_PREFILTER_LIMIT, limit),
         "limit": limit,
     }
@@ -106,10 +113,6 @@ async def search_jobs(
     if remote:
         conditions.append("remote = true")
 
-    if seniority:
-        conditions.append("(seniority = :seniority OR seniority = '')")
-        params["seniority"] = seniority
-
     if locations:
         loc_parts = " OR ".join(f"location ILIKE :loc_{i}" for i in range(len(locations)))
         conditions.append(f"({loc_parts})")
@@ -119,35 +122,35 @@ async def search_jobs(
     where_clause = " AND ".join(conditions)
 
     # Build the fused score expression: a weighted sum of cosine distances
-    # (pgvector's `<=>`, lower = closer), with "experiences" pooled via LEAST()
-    # over as many vectors as this CV actually has.
+    # (pgvector's `<=>`, lower = closer). Each CV facet is compared against
+    # BOTH job vectors (embedding_skills, embedding_context) via LEAST() -
+    # "experiences" additionally pools its own multiple vectors the same way,
+    # so a facet with k sub-vectors contributes LEAST() over 2*k terms.
     score_terms = []
     for name, weight in present_weights.items():
         normalized_weight = weight / total_weight
-        if name == "experiences":
-            least_parts = []
-            for i, vec in enumerate(query_vectors["experiences"]):
-                key = f"emb_exp_{i}"
-                params[key] = json.dumps(vec)
-                least_parts.append(f"embedding <=> CAST(:{key} AS vector)")
-            score_terms.append(f"{normalized_weight} * LEAST({', '.join(least_parts)})")
-        else:
-            key = f"emb_{name}"
-            params[key] = json.dumps(query_vectors[name])
-            score_terms.append(f"{normalized_weight} * (embedding <=> CAST(:{key} AS vector))")
+        vectors = query_vectors["experiences"] if name == "experiences" else [query_vectors[name]]
+        least_parts = []
+        for i, vec in enumerate(vectors):
+            key = f"emb_{name}_{i}"
+            params[key] = json.dumps(vec)
+            least_parts.append(f"embedding_skills <=> CAST(:{key} AS vector)")
+            least_parts.append(f"embedding_context <=> CAST(:{key} AS vector)")
+        score_terms.append(f"{normalized_weight} * LEAST({', '.join(least_parts)})")
     score_expr = " + ".join(score_terms)
 
-    # Stage 1 (candidates): ANN index search on "competences" alone - the only
-    # way pgvector's index can be used, since it only accelerates ORDER BY on a
+    # Stage 1 (candidates): ANN index search on "skills" alone - the only way
+    # pgvector's index can be used, since it only accelerates ORDER BY on a
     # single vector. Stage 2: exact fused score, cheap because it only runs on
     # the pre-filtered `prefilter_limit` rows instead of the whole table.
     stmt = text(f"""
         WITH candidates AS (
             SELECT id, title, company, location, description, url,
-                   contract_type, remote, seniority, skills, created_at, embedding
+                   contract_type, remote, seniority, skills, created_at,
+                   embedding_skills, embedding_context
             FROM cortex_jobs
             WHERE {where_clause}
-            ORDER BY embedding <=> CAST(:emb_competences AS vector)
+            ORDER BY embedding_skills <=> CAST(:emb_skills AS vector)
             LIMIT :prefilter_limit
         )
         SELECT id, title, company, location, description, url,

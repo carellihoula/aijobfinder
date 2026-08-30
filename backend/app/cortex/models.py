@@ -26,9 +26,16 @@ class CortexJob(CortexBase):
     remote = Column(Boolean, default=False)
 
     seniority = Column(String, nullable=True, default="", index=True)  # junior | mid | senior | ""
-    skills = Column(JSON, nullable=True, default=list)                  # reserved for future enrichment
+    skills = Column(JSON, nullable=True, default=list)                  # LLM-extracted at ingestion, see enricher.py
 
-    embedding = Column(Vector(EMBEDDING_DIM), nullable=True)
+    # Two vectors instead of one blob (title+description): "skills" embeds
+    # title+extracted-skills - matched against the CV's skills/experiences/
+    # education facets; "context" embeds the raw description - matched
+    # against the CV's summary. Each CV facet is actually compared to both and
+    # the closer one wins (see cortex_svc.search_jobs), so this split just
+    # gives it two distinct targets instead of one averaged blob.
+    embedding_skills = Column(Vector(EMBEDDING_DIM), nullable=True)
+    embedding_context = Column(Vector(EMBEDDING_DIM), nullable=True)
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     last_seen = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

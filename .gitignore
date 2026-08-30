@@ -69,6 +69,7 @@ temp.md
 cortex.md
 ARCHITECTURE.md
 ARCHITECTURE.txt
+MATCHING_FORMULAS.md
 # Terraform / infra (if added later)
 *.tfstate
 *.tfstate.backup

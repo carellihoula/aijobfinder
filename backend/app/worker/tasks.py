@@ -189,9 +189,17 @@ def run_search(self, analysis_id: str, cv_id: str, user_id: str) -> dict:
 
         except Exception as exc:
             await prog.publish_done(analysis_id)
+            # Full exception (SQL, params, stack trace) goes to the server log only -
+            # str(exc) on a DB error can include the raw query and even embedding
+            # vectors, which must never reach the frontend (info disclosure + it's
+            # a wall of unreadable text for the user). Analysis.error is rendered
+            # as-is on the dashboard, so it must stay a short, generic message.
             logger.error("[run_search] failed - analysis_id=%s | %s", analysis_id, exc, exc_info=True)
             async with AsyncSessionLocal() as db:
-                await analysis_svc.update_analysis(db, UUID(analysis_id), status="failed", error=str(exc))
+                await analysis_svc.update_analysis(
+                    db, UUID(analysis_id), status="failed",
+                    error="Une erreur technique est survenue pendant la recherche. Vous pouvez réessayer.",
+                )
                 await notif_svc.create_notification(
                     db, UUID(user_id), type="analysis_failed",
                     title="Échec de l'analyse",

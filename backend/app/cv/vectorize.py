@@ -14,11 +14,19 @@ MAX_EXPERIENCE_VECTORS = 5
 # time over whichever vectors are actually present (e.g. a CV with no summary
 # redistributes its weight across the others instead of being penalized for it).
 VECTOR_WEIGHTS = {
-    "competences": 0.35,
+    "skills": 0.35,
     "summary": 0.12,
     "experiences": 0.35,
-    "formations": 0.18,
+    "education": 0.18,
 }
+
+# Bonus added on top of the fused embedding score (not part of the 1.0 budget
+# above) for exact skill-keyword overlap between the CV and the job - a cheap
+# complement to the "skills" embedding, catching literal term matches
+# ("Kubernetes" = "Kubernetes") that cosine similarity can blur. Only applied
+# in the Python-side refinement pass (embeddings_filter.py), not in the SQL
+# recall stage (cortex_svc.search_jobs).
+KEYWORD_SKILLS_WEIGHT = 0.15
 
 
 def build_cv_vector_texts(cv: dict) -> dict:
@@ -39,13 +47,13 @@ def build_cv_vector_texts(cv: dict) -> dict:
     """
     result: dict = {}
 
-    competences_parts = []
+    skills_parts = []
     if cv.get("roles"):
-        competences_parts.append("Roles: " + ", ".join(cv["roles"]))
+        skills_parts.append("Roles: " + ", ".join(cv["roles"]))
     if cv.get("skills"):
-        competences_parts.append("Skills: " + ", ".join(cv["skills"][:20]))
-    if competences_parts:
-        result["competences"] = " | ".join(competences_parts)
+        skills_parts.append("Skills: " + ", ".join(cv["skills"][:20]))
+    if skills_parts:
+        result["skills"] = " | ".join(skills_parts)
 
     if cv.get("summary"):
         result["summary"] = cv["summary"]
@@ -64,7 +72,7 @@ def build_cv_vector_texts(cv: dict) -> dict:
 
     degrees = [e.get("degree") for e in cv.get("education", []) if e.get("degree")]
     if degrees:
-        result["formations"] = ", ".join(degrees)
+        result["education"] = ", ".join(degrees)
 
     return result
 
@@ -96,3 +104,18 @@ def regroup_vectors(flat_keys: list[tuple[str, int | None]], raw_vectors: list) 
         else:
             query_vectors.setdefault(name, []).append(vec)
     return query_vectors
+
+
+def keyword_overlap_score(cv_skills: list[str], job_skills: list[str]) -> float:
+    """Exact-match overlap between the CV's skills and the job's LLM-extracted
+    skills, recall-oriented: what fraction of the job's required skills the CV
+    actually covers. Case/whitespace-insensitive, no fuzzy matching or synonym
+    mapping - this is deliberately the "catches exact terms embeddings can
+    blur" complement to the skills embedding, not a replacement for it.
+    Returns 0.0 (no bonus, not a penalty) when the job has no extracted skills
+    to compare against."""
+    job_set = {s.strip().lower() for s in job_skills if s and s.strip()}
+    if not job_set:
+        return 0.0
+    cv_set = {s.strip().lower() for s in cv_skills if s and s.strip()}
+    return len(cv_set & job_set) / len(job_set)

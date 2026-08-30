@@ -1,4 +1,4 @@
-import { SlidersHorizontal, X } from "lucide-react"
+import { RotateCcw, Search, SlidersHorizontal, X } from "lucide-react"
 import type { MatchFilters, ContractType, WorkMode } from "../lib/designTypes"
 
 const CONTRACTS: (ContractType | "all")[] = ["all", "CDI", "CDD", "Freelance", "Stage", "Alternance", "Autres"]
@@ -14,10 +14,27 @@ const pill = "text-[11px] px-2.5 py-1.5 rounded-lg bd text-muted transition whit
 
 export default function FilterBar({ filters, onChange }: { filters: MatchFilters; onChange: (next: MatchFilters) => void }) {
   const set = (patch: Partial<MatchFilters>) => onChange({ ...filters, ...patch })
-  const isActive = filters.contract !== "all" || filters.mode !== "all" || filters.minScore !== 0
+  const isActive = filters.contract !== "all" || filters.mode !== "all" || filters.minScore !== 0 || filters.search !== ""
 
   return (
     <div className="card rounded-2xl p-3 sm:p-3.5">
+      <div className="relative mb-2.5">
+        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-subtle pointer-events-none" />
+        <input
+          type="text"
+          value={filters.search}
+          onChange={(e) => set({ search: e.target.value })}
+          placeholder="Rechercher un poste ou une entreprise..."
+          className="ring-focus w-full text-[12px] bg-well bd rounded-lg pl-8 pr-8 py-2 text-ink placeholder:text-subtle"
+        />
+        {filters.search !== "" && (
+          <button onClick={() => set({ search: "" })}
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-subtle hover:text-ink transition">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        )}
+      </div>
+
       <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
         <div className="flex items-center gap-1.5 shrink-0">
           <SlidersHorizontal className="h-3.5 w-3.5 text-subtle" />
@@ -55,9 +72,9 @@ export default function FilterBar({ filters, onChange }: { filters: MatchFilters
         </div>
         <div className="ml-auto flex items-center gap-2 shrink-0">
           {isActive && (
-            <button onClick={() => set({ contract: "all", mode: "all", minScore: 0 })}
+            <button onClick={() => set({ contract: "all", mode: "all", minScore: 0, search: "" })}
               className="text-[11px] text-subtle hover:text-ink transition flex items-center gap-1">
-              <X className="h-3 w-3" /> Réinitialiser
+              <RotateCcw className="h-3 w-3" /> Réinitialiser
             </button>
           )}
           <span className="text-[11px] text-subtle">Trier</span>

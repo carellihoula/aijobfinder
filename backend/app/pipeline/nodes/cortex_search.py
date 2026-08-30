@@ -58,10 +58,9 @@ async def cortex_search_node(state: PipelineState) -> dict:
     user_locations: list[str] = state.get("user_locations") or []
     contract_type:  str       = state.get("contract_type") or ""
     remote:         bool      = state.get("remote") or False
-    experience_level: str     = state.get("experience_level") or ""
 
     query_vectors = await _embed_cv_vectors(cv)
-    if "competences" not in query_vectors:
+    if "skills" not in query_vectors:
         logger.warning("[cortex_search] Empty CV profile - no jobs returned")
         return {"jobs": []}
 
@@ -73,8 +72,8 @@ async def cortex_search_node(state: PipelineState) -> dict:
         effective_locations = [cleaned] if cleaned else None
 
     logger.info(
-        "[cortex_search] Querying Cortex - contract=%s, remote=%s, seniority=%s, locations=%s",
-        contract_type or "all", remote, experience_level or "all", effective_locations,
+        "[cortex_search] Querying Cortex - contract=%s, remote=%s, locations=%s",
+        contract_type or "all", remote, effective_locations,
     )
 
     async with CortexSessionLocal() as db:
@@ -84,7 +83,6 @@ async def cortex_search_node(state: PipelineState) -> dict:
             limit=TOP_K,
             contract_type=contract_type,
             remote=remote,
-            seniority=experience_level,
             locations=effective_locations,
         )
 
@@ -100,6 +98,7 @@ async def cortex_search_node(state: PipelineState) -> dict:
             "contract_type": r["contract_type"],
             "remote":        r["remote"],
             "date":          r["created_at"].isoformat() if r.get("created_at") else "",
+            "skills":        r.get("skills") or [],
         }
         for r in rows
     ]

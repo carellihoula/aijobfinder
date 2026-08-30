@@ -49,4 +49,19 @@ async def init_cortex() -> None:
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.run_sync(CortexBase.metadata.create_all)
 
+        # create_all() only creates tables that don't exist yet - it never
+        # ALTERs an existing one. This DB has no Alembic tracking (it's a
+        # separate CortexBase/engine from the main app's Base, see
+        # alembic/env.py), so schema evolutions on an already-existing table
+        # need an explicit, idempotent ADD COLUMN here instead.
+        await conn.execute(text(
+            "ALTER TABLE cortex_jobs ADD COLUMN IF NOT EXISTS embedding_skills vector(1536)"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE cortex_jobs ADD COLUMN IF NOT EXISTS embedding_context vector(1536)"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE cortex_jobs DROP COLUMN IF EXISTS embedding"
+        ))
+
     logger.info("[cortex] Vector DB ready")
