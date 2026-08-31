@@ -15,11 +15,16 @@ class CortexBase(DeclarativeBase):
 def _make_engine():
     if not settings.CORTEX_DATABASE_URL:
         return None
+    # Kept small on purpose - see the matching comment in db/session.py: the
+    # Supabase session-mode pooler caps the whole project at 15 connections
+    # total, shared across every container and every forked Celery process.
     return create_async_engine(
         settings.CORTEX_DATABASE_URL,
         echo=settings.DEBUG,
         pool_pre_ping=True,
         pool_recycle=1800,
+        pool_size=2,
+        max_overflow=2,
     )
 
 

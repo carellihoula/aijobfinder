@@ -31,7 +31,12 @@ services:
 
   celery-worker:
     build: ./backend
-    command: celery -A app.worker.celery_app worker --loglevel=info
+    # --concurrency fixed on purpose - without it Celery forks one worker
+    # process per CPU core, and each fork holds its own DB connection pool
+    # (see pool_size in db/session.py) against Supabase's shared, project-wide
+    # 15-connection cap. An unbounded fork count blows past that with more
+    # than one core.
+    command: celery -A app.worker.celery_app worker --loglevel=info --concurrency=2
     env_file:
       - backend/.env
     environment:
