@@ -3,19 +3,27 @@ from sqlalchemy.orm import DeclarativeBase
 
 from app.config import settings
 
-# Kept small on purpose: this engine is instantiated independently in every
-# container (api, celery-worker, celery-beat) and in every forked Celery
-# worker process. The Supabase session-mode pooler caps the WHOLE project at
-# 15 concurrent connections, so the default SQLAlchemy pool (5 + 10 overflow
-# = 15 per engine instance) blows past that limit the moment more than one
-# process is active - see EMAXCONNSESSION errors in celery-worker logs.
+# DATABASE_URL now points at Supabase's transaction-mode pooler (port 6543)
+# instead of session mode (5432) - a session-mode connection is held open for
+# the client's whole lifetime, so with several containers/forked Celery
+# workers each holding their own pool, the project-wide 15-connection cap
+# (Supabase free tier) was hit constantly (see git history on this file for
+# the EMAXCONNSESSION saga). Transaction mode hands the connection back to
+# the pooler as soon as each transaction commits, so far more clients can
+# share the same 15 backend connections.
+# statement_cache_size=0 is required for this: transaction-mode pgbouncer
+# can route two statements from the same asyncpg "prepared" connection to two
+# different backend connections, which breaks asyncpg's server-side prepared
+# statement cache - disabling it makes asyncpg re-send the query text every
+# time instead, which is what pgbouncer in transaction mode expects.
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=settings.DEBUG,
     pool_pre_ping=True,
     pool_recycle=1800,
-    pool_size=2,
-    max_overflow=2,
+    pool_size=1,
+    max_overflow=1,
+    connect_args={"statement_cache_size": 0},
 )
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 

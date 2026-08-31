@@ -103,8 +103,9 @@ Or via Docker Compose from the repo root (`docker-compose.yml`): `docker compose
 
 ## Database
 - `DATABASE_URL` must use `postgresql+asyncpg://` (not psycopg2, not plain postgresql://)
-- Port `5432` for direct connection (Supabase pooler on 6543 is incompatible with asyncpg prepared statements)
-- `CORTEX_DATABASE_URL` uses `postgresql+asyncpg://` on port `5432`
+- Port `6543` - Supabase's transaction-mode pooler, not the session-mode pooler on `5432`. Session mode holds one backend connection per client for its whole lifetime, which hit Supabase's project-wide 15-connection cap constantly once `api` + `celery-worker` (with several forked processes) were all connecting at once. Transaction mode hands the connection back after each transaction, so far more clients share the same 15 backend connections.
+- Both engines (`db/session.py` and `cortex/db.py`) pass `connect_args={"statement_cache_size": 0}` - required for transaction-mode pgbouncer, which can route a connection's statements to different backend connections and breaks asyncpg's server-side prepared statement cache otherwise.
+- `CORTEX_DATABASE_URL` uses `postgresql+asyncpg://` on port `6543`, same reasoning
 - Tables created automatically on startup via `init_db()` and `init_cortex()`
 
 ### 🗄️ Database management (SQLAlchemy & Alembic)
