@@ -5,7 +5,12 @@ services:
       args:
         VITE_GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID}
     ports:
-      - "5173:80"
+      # Bound to localhost only - in production, Caddy (below) is the only
+      # thing that should be reachable from the internet; it reverse-proxies
+      # to this container over the internal Docker network, not this port.
+      # Locally this changes nothing: localhost:5173 still works exactly as
+      # before, `127.0.0.1:5173` and `5173` are equivalent for local access.
+      - "127.0.0.1:5173:80"
     depends_on:
       - api
     restart: unless-stopped
@@ -13,7 +18,7 @@ services:
   api:
     build: ./backend
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     env_file:
       - backend/.env
     environment:
@@ -68,10 +73,28 @@ services:
     image: redis:7-alpine
     command: redis-server --appendonly yes
     ports:
-      - "6379:6379"
+      # Bound to localhost - Redis has no password configured, never expose
+      # it beyond the machine it's running on. Containers still reach it via
+      # the internal Docker network regardless of this host-port binding.
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     restart: unless-stopped
 
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+
 volumes:
   redis_data:
+  caddy_data:
+  caddy_config:

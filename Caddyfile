@@ -1,0 +1,19 @@
+# One Caddyfile, two site blocks - local dev and production coexist here
+# without conflict, since Caddy only ever matches the block whose hostname
+# was actually requested.
+
+# ── Local dev ────────────────────────────────────────────────────────────────
+# Caddy's built-in local CA issues a cert for "localhost" automatically - no
+# real domain needed. First time only: run `caddy trust` on the host (or in
+# this container - see README note below) so your browser stops warning
+# about it, or just click through the one-time warning.
+localhost {
+	reverse_proxy frontend:80
+}
+
+# ── Production ───────────────────────────────────────────────────────────────
+# Free DuckDNS subdomain, pointed at the Azure VM's public IP. If you pick a
+# different subdomain name on duckdns.org, update this line to match.
+aij-finder.duckdns.org {
+	reverse_proxy frontend:80
+}
