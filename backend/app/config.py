@@ -44,6 +44,14 @@ class Settings(BaseSettings):
     CORTEX_DATABASE_URL: str = ""  # postgresql+asyncpg://user:pass@host:5432/postgres
     REDIS_URL: str = "redis://localhost:6379/0"
 
+    # LLM observability (tokens/cost/latency per pipeline node) - Langfuse
+    # Cloud free tier (not self-hosted: the self-host stack needs 16GB+ RAM,
+    # more than this VM has). Empty LANGFUSE_PUBLIC_KEY disables tracing
+    # entirely (no-op), see app/observability/langfuse_client.py.
+    LANGFUSE_PUBLIC_KEY: str = ""
+    LANGFUSE_SECRET_KEY: str = ""
+    LANGFUSE_HOST: str = "https://cloud.langfuse.com"
+
     ADZUNA_APP_ID: str = ""
     ADZUNA_APP_KEY: str = ""
     ADZUNA_COUNTRY: str = "fr"

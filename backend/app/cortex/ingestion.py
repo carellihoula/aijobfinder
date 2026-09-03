@@ -8,6 +8,7 @@ from app.cortex.db import CortexSessionLocal
 from app.cortex.enricher import enrich_jobs
 from app.cortex.providers.base import JobProvider, RawJob
 from app.logger import get_logger
+from app.observability.langfuse_client import count_tokens, traced_embedding
 
 logger = get_logger(__name__)
 
@@ -104,7 +105,10 @@ async def run_provider_ingestion(provider: JobProvider) -> dict:
         for j in enriched
     ]
     context_texts = [j["desc"] for j in enriched]
-    all_embeddings = await embedder.aembed_documents(skills_texts + context_texts)
+    all_texts = skills_texts + context_texts
+    with traced_embedding(f"ingestion.{provider.name}.embed_jobs", settings.OPENAI_EMBEDDING_MODEL) as span:
+        all_embeddings = await embedder.aembed_documents(all_texts)
+        span.update(usage_details={"input": count_tokens(all_texts, settings.OPENAI_EMBEDDING_MODEL)})
     n = len(enriched)
     skills_embeddings = all_embeddings[:n]
     context_embeddings = all_embeddings[n:]

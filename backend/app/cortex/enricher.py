@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.logger import get_logger
+from app.observability.langfuse_client import get_langfuse_callbacks
 
 logger = get_logger(__name__)
 
@@ -53,6 +54,7 @@ def _build_llms():
         model=settings.OPENAI_MODEL_LIGHT,
         temperature=0,
         api_key=settings.OPENAI_API_KEY,
+        callbacks=get_langfuse_callbacks(),
     ).with_structured_output(_EnrichOutput)
 
     gemini_llm = None
@@ -62,6 +64,7 @@ def _build_llms():
             model=settings.GEMINI_MODEL,
             temperature=0,
             google_api_key=settings.GOOGLE_API_KEY,
+            callbacks=get_langfuse_callbacks(),
         ).with_structured_output(_EnrichOutput)
 
     return gemini_llm, openai_llm

@@ -5,6 +5,7 @@ from app.cortex import service as cortex_svc
 from app.cortex.db import CortexSessionLocal
 from app.cv.vectorize import build_cv_vector_texts, flatten_vector_texts, regroup_vectors
 from app.logger import get_logger
+from app.observability.langfuse_client import count_tokens, traced_embedding
 from app.pipeline.state import PipelineState
 
 logger = get_logger(__name__)
@@ -39,7 +40,9 @@ async def _embed_cv_vectors(cv: dict) -> dict:
         model=settings.OPENAI_EMBEDDING_MODEL,
         api_key=settings.OPENAI_API_KEY,
     )
-    raw_vectors = await embedder.aembed_documents(flat_texts)
+    with traced_embedding("cortex_search.embed_cv", settings.OPENAI_EMBEDDING_MODEL) as span:
+        raw_vectors = await embedder.aembed_documents(flat_texts)
+        span.update(usage_details={"input": count_tokens(flat_texts, settings.OPENAI_EMBEDDING_MODEL)})
 
     return regroup_vectors(flat_keys, raw_vectors)
 

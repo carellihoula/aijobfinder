@@ -5,6 +5,7 @@ from langchain_openai import ChatOpenAI
 
 from app.config import settings
 from app.logger import get_logger
+from app.observability.langfuse_client import get_langfuse_callbacks
 from app.pipeline.state import PipelineState
 
 logger = get_logger(__name__)
@@ -81,6 +82,7 @@ async def report_generator_node(state: PipelineState) -> dict:
         model=settings.OPENAI_MODEL_LIGHT,
         temperature=0.3,
         api_key=settings.OPENAI_API_KEY,
+        callbacks=get_langfuse_callbacks(),
     )
 
     messages = [

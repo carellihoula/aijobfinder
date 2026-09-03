@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 from app.config import settings
 from app.cover_letter.backends.weasyprint_backend import render as _render_pdf
 from app.logger import get_logger
+from app.observability.langfuse_client import get_langfuse_callbacks
 
 _FRENCH_MONTHS = [
     "janvier", "février", "mars", "avril", "mai", "juin",
@@ -152,6 +153,7 @@ async def generate_cover_letter(
         model=settings.OPENAI_MODEL_QUALITY,
         temperature=0.4,
         api_key=settings.OPENAI_API_KEY,
+        callbacks=get_langfuse_callbacks(),
     ).with_structured_output(CoverLetterContent)
 
     if previous_content:

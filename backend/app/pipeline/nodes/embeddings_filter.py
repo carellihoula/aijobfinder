@@ -12,6 +12,7 @@ from app.cv.vectorize import (
     regroup_vectors,
 )
 from app.logger import get_logger
+from app.observability.langfuse_client import count_tokens, traced_embedding
 from app.pipeline.state import PipelineState
 
 logger = get_logger(__name__)
@@ -84,7 +85,10 @@ async def embeddings_filter_node(state: PipelineState) -> dict:
     # then every job's context text
     n_cv = len(cv_flat_texts)
     n_jobs = len(jobs)
-    all_vectors = await embedder.aembed_documents(cv_flat_texts + job_skills_texts + job_context_texts)
+    all_texts = cv_flat_texts + job_skills_texts + job_context_texts
+    with traced_embedding("embeddings_filter.embed_cv_and_jobs", settings.OPENAI_EMBEDDING_MODEL) as span:
+        all_vectors = await embedder.aembed_documents(all_texts)
+        span.update(usage_details={"input": count_tokens(all_texts, settings.OPENAI_EMBEDDING_MODEL)})
     cv_vectors = regroup_vectors(cv_flat_keys, all_vectors[:n_cv])
     job_skills_vectors = np.array(all_vectors[n_cv:n_cv + n_jobs])
     job_context_vectors = np.array(all_vectors[n_cv + n_jobs:])
